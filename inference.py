@@ -1,22 +1,29 @@
 #!/usr/bin/env python3
 """Baseline inference for SRE Incident Response environment.
 
-Demonstrates an LLM agent solving incidents using native OpenAI function calling.
-Follows the finqa_inference.py reference pattern from OpenEnv.
+Connects to the environment via HF Space URL (remote) or runs locally.
+Uses native OpenAI function calling for tool use.
 
-Prerequisites:
-    export API_BASE_URL=https://api.openai.com/v1
-    export MODEL_NAME=gpt-4o
-    export HF_TOKEN=your_key_here   # or OPENAI_API_KEY
+Required env vars:
+    API_BASE_URL   — LLM endpoint (default: https://api.openai.com/v1)
+    MODEL_NAME     — model identifier (default: gpt-4o)
+    HF_TOKEN       — HuggingFace / API key for the LLM
 
 Usage:
+    # Against remote HF Space (how judges run it):
+    python inference.py --space https://Maverick98-sre-incident-env.hf.space
+
+    # Local (faster, for development):
     python inference.py
+
+    # Options:
     python inference.py --difficulty hard --episodes 3 --model o4-mini
 """
 
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import os
 import sys
@@ -28,15 +35,13 @@ load_dotenv()
 
 from openai import OpenAI
 
-from server.environment import SREIncidentEnvironment
-from openenv.core.env_server.mcp_types import CallToolAction, ListToolsAction
-
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
 
 API_BASE_URL = os.getenv("API_BASE_URL") or "https://api.openai.com/v1"
-API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY") or os.getenv("OPENAI_API_KEY")
+# For LLM calls: prefer explicit API keys over HF_TOKEN
+API_KEY = os.getenv("OPENAI_API_KEY") or os.getenv("API_KEY") or os.getenv("HF_TOKEN")
 MODEL = os.getenv("MODEL_NAME") or "gpt-4o"
 VERBOSE = True
 
@@ -88,16 +93,16 @@ GOOD diagnosis:
 BAD: affected_service="api-gateway", failure_type="other" (symptom service, wrong type)
 """
 
+
 # ---------------------------------------------------------------------------
-# Tool Discovery & Conversion
+# Tool conversion (MCP tools → OpenAI function calling format)
 # ---------------------------------------------------------------------------
 
 
-def discover_tools(env: SREIncidentEnvironment) -> List[dict]:
-    """Discover MCP tools from environment and convert to OpenAI function format."""
-    obs = env.step(ListToolsAction())
+def mcp_tools_to_openai(tools) -> List[dict]:
+    """Convert MCP tool list to OpenAI function-calling format."""
     openai_tools = []
-    for tool in obs.tools:
+    for tool in tools:
         properties = {}
         required = []
         if tool.input_schema and "properties" in tool.input_schema:
@@ -128,23 +133,35 @@ def discover_tools(env: SREIncidentEnvironment) -> List[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Episode Runner
+# Episode runner (works with both local and remote env)
 # ---------------------------------------------------------------------------
 
 
-def run_episode(
-    env: SREIncidentEnvironment,
-    client: OpenAI,
+async def run_episode(
+    env,
+    llm_client: OpenAI,
     model: str,
     tools: List[dict],
     difficulty: str = "medium",
 ) -> Dict[str, Any]:
-    """Run a single investigation episode. Returns result dict."""
+    """Run a single investigation episode against any OpenEnv MCP environment."""
+    from openenv.core.env_server.mcp_types import CallToolAction
+
     tool_names = [t["function"]["name"] for t in tools]
     is_reasoning = any(x in model for x in ["o3", "o4", "gpt-5"])
 
-    obs = env.reset(difficulty=difficulty)
-    alert_msg = obs.metadata.get("message", "Incident detected.")
+    # Reset episode
+    result = await env.reset(difficulty=difficulty)
+    # Extract alert message — handle both StepResult and Observation formats
+    alert_msg = ""
+    if hasattr(result, "observation"):
+        obs_obj = result.observation
+        if hasattr(obs_obj, "metadata") and obs_obj.metadata:
+            alert_msg = obs_obj.metadata.get("message", "")
+    if hasattr(result, "metadata") and result.metadata:
+        alert_msg = alert_msg or result.metadata.get("message", "")
+    if not alert_msg:
+        alert_msg = "Production incident detected. You have a limited query budget. Use list_services to begin investigation."
 
     chat_history = [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -153,11 +170,12 @@ def run_episode(
 
     step_count = 0
     max_steps = 20
+    done = False
 
-    while not obs.done and step_count < max_steps:
+    while not done and step_count < max_steps:
         step_count += 1
 
-        # Build API call kwargs
+        # LLM call with function calling
         create_kwargs: Dict[str, Any] = {
             "model": model,
             "messages": chat_history,
@@ -171,7 +189,7 @@ def run_episode(
             create_kwargs["max_tokens"] = 500
 
         try:
-            response = client.chat.completions.create(**create_kwargs)
+            response = llm_client.chat.completions.create(**create_kwargs)
         except Exception as e:
             if VERBOSE:
                 print(f"    API error: {str(e)[:100]}")
@@ -179,14 +197,13 @@ def run_episode(
 
         message = response.choices[0].message
 
-        # Handle function call response
+        # Handle function call
         if message.tool_calls:
             tool_call = message.tool_calls[0]
             tool_name = tool_call.function.name
             tool_args = json.loads(tool_call.function.arguments)
             tool_call_id = tool_call.id
         elif message.content:
-            # Model responded with text instead of tool call — try to extract
             if VERBOSE:
                 print(f"    [text] {message.content[:80]}")
             chat_history.append({"role": "assistant", "content": message.content})
@@ -198,7 +215,7 @@ def run_episode(
         else:
             continue
 
-        # Add assistant message with tool call to history
+        # Add tool call to history
         chat_history.append({
             "role": "assistant",
             "content": None,
@@ -227,10 +244,10 @@ def run_episode(
                 print(" [unknown tool]")
             continue
 
-        # Execute in environment
+        # Execute in environment (async)
         try:
             action = CallToolAction(tool_name=tool_name, arguments=tool_args)
-            obs = env.step(action)
+            step_result = await env.step(action)
         except Exception as e:
             chat_history.append({
                 "role": "tool",
@@ -241,27 +258,55 @@ def run_episode(
                 print(f" [error: {e}]")
             continue
 
-        # Extract result text
+        # Extract from StepResult → observation → result
+        obs = step_result.observation if hasattr(step_result, "observation") else step_result
+
+        # Extract tool result text from various formats
         result_text = ""
-        if hasattr(obs, "result") and obs.result and hasattr(obs.result, "data"):
-            result_text = obs.result.data
-        elif obs.metadata:
+        # CallToolObservation has .result dict with content/data
+        obs_result = getattr(obs, "result", None)
+        if obs_result:
+            if isinstance(obs_result, dict):
+                # Remote format: {"content": [{"text": "..."}], "data": "..."}
+                if "data" in obs_result:
+                    result_text = obs_result["data"]
+                elif "content" in obs_result:
+                    for item in obs_result["content"]:
+                        if isinstance(item, dict) and "text" in item:
+                            result_text = item["text"]
+                            break
+            elif hasattr(obs_result, "data"):
+                # Local format: CallToolResult object
+                result_text = obs_result.data
+        if not result_text and hasattr(obs, "metadata") and obs.metadata:
             result_text = json.dumps(obs.metadata)
 
+        # Parse done/reward from tool result text (works for both local and remote)
+        done = getattr(step_result, "done", False) or getattr(obs, "done", False)
+        reward = getattr(step_result, "reward", 0.0) or getattr(obs, "reward", 0.0)
+        if result_text:
+            try:
+                parsed = json.loads(result_text)
+                if parsed.get("done"):
+                    done = True
+                if "reward" in parsed:
+                    reward = float(parsed["reward"])
+            except (json.JSONDecodeError, TypeError):
+                pass
+
         if VERBOSE:
-            if obs.done:
-                print(f" → done, reward={obs.reward:.4f}")
+            if done:
+                print(f" → done, reward={reward:.4f}")
             else:
                 print()
 
-        if obs.done:
+        if done:
             return {
-                "reward": float(obs.reward),
+                "reward": float(reward),
                 "steps": step_count,
-                "queries_used": env._queries_used,
             }
 
-        # Feed result back via proper tool role
+        # Feed result back
         chat_history.append({
             "role": "tool",
             "tool_call_id": tool_call_id,
@@ -280,48 +325,83 @@ def run_episode(
 # ---------------------------------------------------------------------------
 
 
-def main() -> None:
+async def async_main() -> None:
     parser = argparse.ArgumentParser(description="SRE Incident Env Inference")
     parser.add_argument("--difficulty", default="medium",
                         choices=["easy", "medium", "hard", "expert"])
     parser.add_argument("--episodes", type=int, default=3)
     parser.add_argument("--model", default=None)
+    parser.add_argument("--space", default=None,
+                        help="HF Space URL (e.g. https://Maverick98-sre-incident-env.hf.space). "
+                             "If omitted, runs environment locally.")
     args = parser.parse_args()
 
     if not API_KEY:
-        print("Error: Set API_KEY, HF_TOKEN, or OPENAI_API_KEY.")
+        print("Error: Set HF_TOKEN, API_KEY, or OPENAI_API_KEY.")
         sys.exit(1)
 
     model = args.model or MODEL
-    client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
-    env = SREIncidentEnvironment()
+    llm_client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
 
-    # Discover tools from environment (MCP → OpenAI format)
-    env.reset(difficulty=args.difficulty)  # need active episode for tool discovery
-    tools = discover_tools(env)
-    if VERBOSE:
-        print(f"Model: {model}")
-        print(f"Tools: {[t['function']['name'] for t in tools]}")
-        print(f"Difficulty: {args.difficulty} | Episodes: {args.episodes}")
-        print("=" * 60)
+    # Connect to environment: remote HF Space or local
+    if args.space:
+        from client import SREIncidentEnv
+        env = SREIncidentEnv(base_url=args.space)
+        mode = f"remote ({args.space})"
+    else:
+        # Local: use the env directly but wrap with async client interface
+        from client import SREIncidentEnv
+        env = SREIncidentEnv(base_url="http://localhost:8000")
+        # Start local server in background
+        import subprocess
+        import time
+        server_proc = subprocess.Popen(
+            [sys.executable, "-m", "uvicorn", "server.app:app",
+             "--host", "127.0.0.1", "--port", "8000"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        time.sleep(3)  # Wait for server startup
+        mode = "local (http://127.0.0.1:8000)"
 
-    results = []
-    for i in range(args.episodes):
-        print(f"\nEpisode {i+1}/{args.episodes}:")
-        result = run_episode(env, client, model, tools, args.difficulty)
-        results.append(result)
+    try:
+        # Discover tools
+        await env.reset(difficulty=args.difficulty)
+        mcp_tools = await env.list_tools()
+        tools = mcp_tools_to_openai(mcp_tools)
 
-    # Summary
-    valid = [r for r in results if "error" not in r]
-    avg = sum(r["reward"] for r in valid) / len(valid) if valid else 0
-    errors = len(results) - len(valid)
+        if VERBOSE:
+            print(f"Mode: {mode}")
+            print(f"Model: {model}")
+            print(f"Tools: {[t['function']['name'] for t in tools]}")
+            print(f"Difficulty: {args.difficulty} | Episodes: {args.episodes}")
+            print("=" * 60)
 
-    print(f"\n{'=' * 60}")
-    print(f"Results ({args.difficulty}, {model}):")
-    for i, r in enumerate(results):
-        status = f"reward={r['reward']:.4f}" if "error" not in r else f"error={r['error'][:40]}"
-        print(f"  Episode {i+1}: {status}")
-    print(f"  Average: {avg:.4f} ({len(valid)} valid, {errors} errors)")
+        results = []
+        for i in range(args.episodes):
+            print(f"\nEpisode {i+1}/{args.episodes}:")
+            result = await run_episode(env, llm_client, model, tools, args.difficulty)
+            results.append(result)
+
+        # Summary
+        valid = [r for r in results if "error" not in r]
+        avg = sum(r["reward"] for r in valid) / len(valid) if valid else 0
+        errors = len(results) - len(valid)
+
+        print(f"\n{'=' * 60}")
+        print(f"Results ({args.difficulty}, {model}):")
+        for i, r in enumerate(results):
+            status = f"reward={r['reward']:.4f}" if "error" not in r else f"error={r['error'][:40]}"
+            print(f"  Episode {i+1}: {status}")
+        print(f"  Average: {avg:.4f} ({len(valid)} valid, {errors} errors)")
+
+    finally:
+        await env.close()
+        if not args.space and 'server_proc' in dir():
+            server_proc.terminate()
+
+
+def main() -> None:
+    asyncio.run(async_main())
 
 
 if __name__ == "__main__":
