@@ -199,6 +199,7 @@ class SREIncidentEnvironment(MCPEnvironment):
                 submitted_failure_type=failure_type,
                 true_failure_type=failure["root_cause_type"],
                 submitted_chain=chain_list,
+                services_graph=self._scenario["services"],
             )
 
             self._done = True
