@@ -82,7 +82,8 @@ def test_reward_coverage_bonus():
     assert r_broad > r_narrow
 
 
-def test_reward_difficulty_multiplier():
+def test_reward_no_difficulty_multiplier():
+    """Difficulty does not affect reward — harder scenarios are inherently harder."""
     kwargs = dict(
         submitted_root_cause="pool exhausted", submitted_service="db",
         true_root_cause="pool exhausted", true_root_service="db",
@@ -90,7 +91,7 @@ def test_reward_difficulty_multiplier():
     )
     r_easy = compute_reward(**kwargs, difficulty="easy")
     r_hard = compute_reward(**kwargs, difficulty="hard")
-    assert r_hard >= r_easy
+    assert r_easy == r_hard
 
 
 def test_reward_never_exceeds_one():

@@ -1,6 +1,7 @@
 """Reward computation for SRE incident diagnosis.
 
 Uses EmbeddingGemma-300M for semantic similarity — runs locally, no API calls.
+No difficulty multiplier — harder scenarios are inherently harder to score on.
 
 Reward components (7):
     1. Service accuracy   (0.20): exact match on root service name
@@ -121,9 +122,5 @@ def compute_reward(
         + efficiency_score
         + calibration_score
     )
-
-    # Difficulty multiplier
-    multipliers = {"easy": 0.6, "medium": 0.8, "hard": 1.0, "expert": 1.2}
-    total = total * multipliers.get(difficulty, 1.0)
 
     return round(min(1.0, max(0.0, total)), 4)
