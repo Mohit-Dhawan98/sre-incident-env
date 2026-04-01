@@ -2,7 +2,7 @@
 title: SRE Incident Response Environment
 emoji: 🔧
 colorFrom: red
-colorTo: orange
+colorTo: yellow
 sdk: docker
 app_port: 8000
 ---
