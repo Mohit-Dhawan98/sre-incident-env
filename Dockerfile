@@ -19,10 +19,18 @@ RUN pip install --no-cache-dir \
     "uvicorn>=0.24.0" \
     "fastmcp>=3.0.0" \
     "openai>=2.7.2" \
-    "requests>=2.31.0"
+    "requests>=2.31.0" \
+    "python-dotenv"
 
 # Pre-download embedding model at build time
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('google/embeddinggemma-300m')"
+# Use HF_TOKEN build arg for gated model access
+ARG HF_TOKEN=""
+RUN if [ -n "$HF_TOKEN" ]; then \
+        HF_TOKEN=$HF_TOKEN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('google/embeddinggemma-300m')"; \
+    else \
+        python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('google/embeddinggemma-300m')" || \
+        echo "WARNING: Model pre-download failed. Will download on first use."; \
+    fi
 
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH="/app:$PYTHONPATH"
