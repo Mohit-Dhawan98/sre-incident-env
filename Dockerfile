@@ -23,14 +23,13 @@ RUN pip install --no-cache-dir \
     "python-dotenv"
 
 # Pre-download embedding model at build time
-# Use HF_TOKEN build arg for gated model access
-ARG HF_TOKEN=""
-RUN if [ -n "$HF_TOKEN" ]; then \
-        HF_TOKEN=$HF_TOKEN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('google/embeddinggemma-300m')"; \
-    else \
-        python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('google/embeddinggemma-300m')" || \
-        echo "WARNING: Model pre-download failed. Will download on first use."; \
-    fi
+# HF_TOKEN is passed as a secret, not baked into the image
+RUN --mount=type=secret,id=HF_TOKEN,required=false \
+    if [ -f /run/secrets/HF_TOKEN ]; then \
+        export HF_TOKEN=$(cat /run/secrets/HF_TOKEN); \
+    fi && \
+    python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('google/embeddinggemma-300m')" \
+    || echo "Model pre-download skipped. Will download on first request."
 
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH="/app:$PYTHONPATH"
