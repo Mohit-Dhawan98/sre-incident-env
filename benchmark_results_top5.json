@@ -1,0 +1,148 @@
+{
+  "gpt-5.4": [
+    {
+      "reward": 0.3793,
+      "svc_correct": true,
+      "steps": 12,
+      "submitted": "product-cache degradation caused cache hit rate to collapse from ~96% to ~4% at ",
+      "scenario": "redis_cache_node_failure_001",
+      "diff": "easy"
+    },
+    {
+      "reward": 0.5084,
+      "svc_correct": true,
+      "steps": 11,
+      "submitted": "worker-pool pods are cycling due to OOM kills caused by unbounded growth in acti",
+      "scenario": "worker_oom_memory_leak_001",
+      "diff": "medium"
+    },
+    {
+      "reward": 0.095,
+      "svc_correct": false,
+      "steps": 9,
+      "submitted": "catalog-db is experiencing connection saturation causing severe query queueing: ",
+      "scenario": "n_plus_one_cache_bypass_001",
+      "diff": "hard"
+    },
+    {
+      "reward": 0.016,
+      "svc_correct": false,
+      "steps": 8,
+      "submitted": "Load balancer backend latency is steadily increasing (backend_p99_ms from ~7s to",
+      "scenario": "config_drift_gc_cascade_001",
+      "diff": "expert"
+    }
+  ],
+  "gpt-5.1-codex": [
+    {
+      "reward": 0,
+      "error": "Error code: 404 - {'error': {'message': 'This is not a chat model and thus not s",
+      "scenario": "redis_cache_node_failure_001",
+      "diff": "easy"
+    },
+    {
+      "reward": 0,
+      "error": "Error code: 404 - {'error': {'message': 'This is not a chat model and thus not s",
+      "scenario": "worker_oom_memory_leak_001",
+      "diff": "medium"
+    },
+    {
+      "reward": 0,
+      "error": "Error code: 404 - {'error': {'message': 'This is not a chat model and thus not s",
+      "scenario": "n_plus_one_cache_bypass_001",
+      "diff": "hard"
+    },
+    {
+      "reward": 0,
+      "error": "Error code: 404 - {'error': {'message': 'This is not a chat model and thus not s",
+      "scenario": "config_drift_gc_cascade_001",
+      "diff": "expert"
+    }
+  ],
+  "o4-mini": [
+    {
+      "reward": 0.2399,
+      "svc_correct": false,
+      "steps": 9,
+      "submitted": "Cache node failure in product-cache cluster (node cache-2 declared FAILED) leadi",
+      "scenario": "redis_cache_node_failure_001",
+      "diff": "easy"
+    },
+    {
+      "reward": 0.5702,
+      "svc_correct": true,
+      "steps": 8,
+      "submitted": "Memory leak in worker-pool service causing unbounded RSS growth, triggering repe",
+      "scenario": "worker_oom_memory_leak_001",
+      "diff": "medium"
+    },
+    {
+      "reward": 0.121,
+      "svc_correct": false,
+      "steps": 7,
+      "submitted": "Cache-layer outage caused a cache stampede, resulting in a surge of catalog-serv",
+      "scenario": "n_plus_one_cache_bypass_001",
+      "diff": "hard"
+    },
+    {
+      "reward": 0.5779,
+      "svc_correct": true,
+      "steps": 7,
+      "submitted": "Increased query latency on session-db causing timeouts in user-service and propa",
+      "scenario": "config_drift_gc_cascade_001",
+      "diff": "expert"
+    }
+  ],
+  "gpt-4o": [
+    {
+      "reward": 0,
+      "error": "max_turns",
+      "scenario": "redis_cache_node_failure_001",
+      "diff": "easy"
+    },
+    {
+      "reward": 0,
+      "error": "max_turns",
+      "scenario": "worker_oom_memory_leak_001",
+      "diff": "medium"
+    },
+    {
+      "reward": 0,
+      "error": "max_turns",
+      "scenario": "n_plus_one_cache_bypass_001",
+      "diff": "hard"
+    },
+    {
+      "reward": 0,
+      "error": "max_turns",
+      "scenario": "config_drift_gc_cascade_001",
+      "diff": "expert"
+    }
+  ],
+  "gemini-2.5-pro": [
+    {
+      "reward": 0,
+      "error": "max_turns",
+      "scenario": "redis_cache_node_failure_001",
+      "diff": "easy"
+    },
+    {
+      "reward": 0,
+      "error": "max_turns",
+      "scenario": "worker_oom_memory_leak_001",
+      "diff": "medium"
+    },
+    {
+      "reward": 0,
+      "error": "max_turns",
+      "scenario": "n_plus_one_cache_bypass_001",
+      "diff": "hard"
+    },
+    {
+      "reward": 0,
+      "error": "max_turns",
+      "scenario": "config_drift_gc_cascade_001",
+      "diff": "expert"
+    }
+  ]
+}

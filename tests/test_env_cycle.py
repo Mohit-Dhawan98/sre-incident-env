@@ -44,8 +44,9 @@ def test_full_episode_easy(env):
     obs = env.step(CallToolAction(
         tool_name="submit_diagnosis",
         arguments={
-            "root_cause": "cache node failure",
             "affected_service": svc,
+            "failure_type": "cache_node_failure",
+            "root_cause": "cache node failure",
             "confidence": 0.7,
         },
     ))
@@ -114,7 +115,7 @@ def test_step_after_done_raises(env):
     env.reset(seed=42, difficulty="easy")
     env.step(CallToolAction(
         tool_name="submit_diagnosis",
-        arguments={"root_cause": "test", "affected_service": "test", "confidence": 0.5},
+        arguments={"affected_service": "test", "failure_type": "other", "root_cause": "test", "confidence": 0.5},
     ))
     # Next tool call should get error response (episode done)
     obs = env.step(CallToolAction(

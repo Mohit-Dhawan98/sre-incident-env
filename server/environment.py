@@ -158,21 +158,30 @@ class SREIncidentEnvironment(MCPEnvironment):
 
         @mcp.tool
         def submit_diagnosis(
-            root_cause: str,
             affected_service: str,
+            failure_type: str,
+            root_cause: str,
             confidence: float = 0.5,
+            causal_chain: Optional[str] = None,
         ) -> str:
             """Submit your root-cause diagnosis. Ends the episode.
 
             Args:
-                root_cause: Your natural-language root cause statement. Be specific: WHO did WHAT causing WHAT.
-                affected_service: The service where the root cause originates.
+                affected_service: The service where the root cause ORIGINATES (not the loudest symptom).
+                failure_type: Category of failure. One of: oom_kill, connection_pool, connection_leak, config_drift, slow_external_api, gc_pressure, disk_full, n_plus_one_query, thread_pool_starvation, cert_expiry, cache_stampede, cache_node_failure, replication_lag, rate_limit_breach, dns_misconfiguration, thundering_herd_deploy, clock_skew_jwt, library_version_conflict, split_brain_db, circular_dependency_deadlock, bad_index_drop, or other.
+                root_cause: Natural-language root cause: "[service] [mechanism] caused [downstream effect]".
                 confidence: Your confidence level 0.0 to 1.0.
+                causal_chain: Comma-separated ordered list of services in the causal chain, e.g. "svc-a,svc-b,svc-c" from root cause to visible symptom.
             """
             if self._done:
                 return json.dumps({"error": "Episode already ended."})
             if self._scenario is None:
                 return json.dumps({"error": "No episode active."})
+
+            # Parse causal_chain from comma-separated string
+            chain_list = []
+            if causal_chain:
+                chain_list = [s.strip() for s in causal_chain.split(",") if s.strip()]
 
             failure = self._scenario["failure"]
             all_services = set(self._scenario["services"].keys())
@@ -187,6 +196,9 @@ class SREIncidentEnvironment(MCPEnvironment):
                 confidence=confidence,
                 services_queried=self._services_queried,
                 all_services=all_services,
+                submitted_failure_type=failure_type,
+                true_failure_type=failure["root_cause_type"],
+                submitted_chain=chain_list,
             )
 
             self._done = True

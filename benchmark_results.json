@@ -1,0 +1,450 @@
+{
+  "openai/gpt-4o-mini": [
+    {
+      "reward": 0.2654,
+      "steps": 5,
+      "queries_used": 3,
+      "elapsed_s": 26.4,
+      "submitted_service": "checkout-service",
+      "true_service": "product-cache",
+      "service_correct": false,
+      "submitted_cause": "Product cache node failure leading to degraded cache performance and increased database load",
+      "true_cause": "product-cache Redis node cache-2 failed and was evicted from the cluster, causing checkout-service t",
+      "tool_sequence": [
+        "list_services",
+        "read_logs",
+        "read_logs",
+        "check_metric",
+        "submit_diagnosis"
+      ],
+      "scenario_id": "redis_cache_node_failure_001",
+      "difficulty": "easy"
+    },
+    {
+      "reward": 0.3506,
+      "steps": 6,
+      "queries_used": 4,
+      "elapsed_s": 10.6,
+      "submitted_service": "order-service",
+      "true_service": "worker-pool",
+      "service_correct": false,
+      "submitted_cause": "worker pods OOMKilled due to insufficient memory allocation, causing order processing failures in or",
+      "true_cause": "worker-pool pods are being OOM-killed due to a memory leak in the order deserialization code introdu",
+      "tool_sequence": [
+        "list_services",
+        "read_logs",
+        "read_logs",
+        "check_metric",
+        "check_metric",
+        "submit_diagnosis"
+      ],
+      "scenario_id": "worker_oom_memory_leak_001",
+      "difficulty": "medium"
+    },
+    {
+      "reward": 0.5995,
+      "steps": 6,
+      "queries_used": 4,
+      "elapsed_s": 10.4,
+      "submitted_service": "payment-processor",
+      "true_service": "payment-processor",
+      "service_correct": true,
+      "submitted_cause": "payment-processor exceeding Stripe API rate limits due to high request rate, causing 429 TooManyRequ",
+      "true_cause": "payment-processor exceeded Stripe API rate limit of 100 requests/second due to a missing exponential",
+      "tool_sequence": [
+        "list_services",
+        "read_logs",
+        "check_metric",
+        "check_metric",
+        "check_metric",
+        "submit_diagnosis"
+      ],
+      "scenario_id": "payment_gateway_rate_limit_001",
+      "difficulty": "medium"
+    },
+    {
+      "reward": 0.1554,
+      "steps": 9,
+      "queries_used": 7,
+      "elapsed_s": 14.0,
+      "submitted_service": "catalog-db",
+      "true_service": "catalog-service",
+      "service_correct": false,
+      "submitted_cause": "catalog-service issuing excessive variant fetches leading to high active connections in catalog-db",
+      "true_cause": "catalog-service v5.1.0 introduced an N+1 query bug in the product listing endpoint that bypasses the",
+      "tool_sequence": [
+        "list_services",
+        "read_logs",
+        "read_logs",
+        "read_logs",
+        "read_logs",
+        "read_logs",
+        "check_metric",
+        "check_metric",
+        "submit_diagnosis"
+      ],
+      "scenario_id": "n_plus_one_cache_bypass_001",
+      "difficulty": "hard"
+    },
+    {
+      "reward": 0.0,
+      "steps": 7,
+      "queries_used": 6,
+      "elapsed_s": 9.5,
+      "submitted_service": "",
+      "true_service": "session-db",
+      "service_correct": false,
+      "submitted_cause": "",
+      "true_cause": "session-db PostgreSQL connection timeout was silently changed from 30s to 300s via a config manageme",
+      "tool_sequence": [
+        "list_services",
+        "read_logs",
+        "read_logs",
+        "read_logs",
+        "read_logs",
+        "read_logs",
+        "check_metric"
+      ],
+      "scenario_id": "config_drift_gc_cascade_001",
+      "difficulty": "expert"
+    }
+  ],
+  "openai/gpt-4o": [
+    {
+      "reward": 0.1697,
+      "steps": 6,
+      "queries_used": 4,
+      "elapsed_s": 16.9,
+      "submitted_service": "checkout-service",
+      "true_service": "product-cache",
+      "service_correct": false,
+      "submitted_cause": "product-cache memory eviction leading to low cache hit rate",
+      "true_cause": "product-cache Redis node cache-2 failed and was evicted from the cluster, causing checkout-service t",
+      "tool_sequence": [
+        "list_services",
+        "read_logs",
+        "check_metric",
+        "check_metric",
+        "check_metric",
+        "submit_diagnosis"
+      ],
+      "scenario_id": "redis_cache_node_failure_001",
+      "difficulty": "easy"
+    },
+    {
+      "reward": 0.4729,
+      "steps": 6,
+      "queries_used": 4,
+      "elapsed_s": 17.4,
+      "submitted_service": "worker-pool",
+      "true_service": "worker-pool",
+      "service_correct": true,
+      "submitted_cause": "worker-pool experiencing OOMKilled due to memory usage exceeding 768MB limit",
+      "true_cause": "worker-pool pods are being OOM-killed due to a memory leak in the order deserialization code introdu",
+      "tool_sequence": [
+        "list_services",
+        "read_logs",
+        "check_metric",
+        "check_metric",
+        "check_metric",
+        "submit_diagnosis"
+      ],
+      "scenario_id": "worker_oom_memory_leak_001",
+      "difficulty": "medium"
+    },
+    {
+      "reward": 0.5854,
+      "steps": 7,
+      "queries_used": 5,
+      "elapsed_s": 18.7,
+      "submitted_service": "payment-processor",
+      "true_service": "payment-processor",
+      "service_correct": true,
+      "submitted_cause": "payment-processor is exceeding Stripe API rate limits, causing 429 TooManyRequests errors",
+      "true_cause": "payment-processor exceeded Stripe API rate limit of 100 requests/second due to a missing exponential",
+      "tool_sequence": [
+        "list_services",
+        "read_logs",
+        "read_logs",
+        "check_metric",
+        "check_metric",
+        "check_metric",
+        "submit_diagnosis"
+      ],
+      "scenario_id": "payment_gateway_rate_limit_001",
+      "difficulty": "medium"
+    },
+    {
+      "reward": 0.2856,
+      "steps": 6,
+      "queries_used": 4,
+      "elapsed_s": 31.9,
+      "submitted_service": "catalog-db",
+      "true_service": "catalog-service",
+      "service_correct": false,
+      "submitted_cause": "catalog-service issuing excessive database queries due to unbatched variant fetches",
+      "true_cause": "catalog-service v5.1.0 introduced an N+1 query bug in the product listing endpoint that bypasses the",
+      "tool_sequence": [
+        "list_services",
+        "read_logs",
+        "check_metric",
+        "check_metric",
+        "check_metric",
+        "submit_diagnosis"
+      ],
+      "scenario_id": "n_plus_one_cache_bypass_001",
+      "difficulty": "hard"
+    },
+    {
+      "reward": 0.0259,
+      "steps": 7,
+      "queries_used": 5,
+      "elapsed_s": 28.3,
+      "submitted_service": "load-balancer",
+      "true_service": "session-db",
+      "service_correct": false,
+      "submitted_cause": "backend server overload causing high latency in load-balancer",
+      "true_cause": "session-db PostgreSQL connection timeout was silently changed from 30s to 300s via a config manageme",
+      "tool_sequence": [
+        "list_services",
+        "read_logs",
+        "read_logs",
+        "read_logs",
+        "check_metric",
+        "check_metric",
+        "submit_diagnosis"
+      ],
+      "scenario_id": "config_drift_gc_cascade_001",
+      "difficulty": "expert"
+    }
+  ],
+  "openai/o3-mini": [
+    {
+      "reward": 0.0,
+      "error": "Error code: 400 - {'error': {'message': \"Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead.\", 'type': 'invalid_request_error', 'param': 'max_tokens', 'code': 'unsupported_parameter'}}",
+      "steps": 0,
+      "scenario_id": "redis_cache_node_failure_001",
+      "difficulty": "easy"
+    },
+    {
+      "reward": 0.0,
+      "error": "Error code: 400 - {'error': {'message': \"Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead.\", 'type': 'invalid_request_error', 'param': 'max_tokens', 'code': 'unsupported_parameter'}}",
+      "steps": 0,
+      "scenario_id": "worker_oom_memory_leak_001",
+      "difficulty": "medium"
+    },
+    {
+      "reward": 0.0,
+      "error": "Error code: 400 - {'error': {'message': \"Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead.\", 'type': 'invalid_request_error', 'param': 'max_tokens', 'code': 'unsupported_parameter'}}",
+      "steps": 0,
+      "scenario_id": "payment_gateway_rate_limit_001",
+      "difficulty": "medium"
+    },
+    {
+      "reward": 0.0,
+      "error": "Error code: 400 - {'error': {'message': \"Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead.\", 'type': 'invalid_request_error', 'param': 'max_tokens', 'code': 'unsupported_parameter'}}",
+      "steps": 0,
+      "scenario_id": "n_plus_one_cache_bypass_001",
+      "difficulty": "hard"
+    },
+    {
+      "reward": 0.0,
+      "error": "Error code: 400 - {'error': {'message': \"Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead.\", 'type': 'invalid_request_error', 'param': 'max_tokens', 'code': 'unsupported_parameter'}}",
+      "steps": 0,
+      "scenario_id": "config_drift_gc_cascade_001",
+      "difficulty": "expert"
+    }
+  ],
+  "gemini/gemini-2.0-flash": [
+    {
+      "reward": 0.2099,
+      "steps": 9,
+      "queries_used": 7,
+      "elapsed_s": 11.3,
+      "submitted_service": "checkout-service",
+      "true_service": "product-cache",
+      "service_correct": false,
+      "submitted_cause": "product-cache memory usage dropped, causing a cache miss spike and degraded checkout-service perform",
+      "true_cause": "product-cache Redis node cache-2 failed and was evicted from the cluster, causing checkout-service t",
+      "tool_sequence": [
+        "list_services",
+        "read_logs",
+        "read_logs",
+        "read_logs",
+        "read_logs",
+        "check_metric",
+        "check_metric",
+        "check_metric",
+        "submit_diagnosis"
+      ],
+      "scenario_id": "redis_cache_node_failure_001",
+      "difficulty": "easy"
+    },
+    {
+      "reward": 0.5479,
+      "steps": 8,
+      "queries_used": 6,
+      "elapsed_s": 9.7,
+      "submitted_service": "worker-pool",
+      "true_service": "worker-pool",
+      "service_correct": true,
+      "submitted_cause": "Memory leak in worker-pool causing OOM kills and pod cycling",
+      "true_cause": "worker-pool pods are being OOM-killed due to a memory leak in the order deserialization code introdu",
+      "tool_sequence": [
+        "list_services",
+        "read_logs",
+        "read_logs",
+        "check_metric",
+        "check_metric",
+        "check_metric",
+        "check_metric",
+        "submit_diagnosis"
+      ],
+      "scenario_id": "worker_oom_memory_leak_001",
+      "difficulty": "medium"
+    },
+    {
+      "reward": 0.2388,
+      "steps": 9,
+      "queries_used": 7,
+      "elapsed_s": 10.4,
+      "submitted_service": "checkout-service",
+      "true_service": "payment-processor",
+      "service_correct": false,
+      "submitted_cause": "Payment processor is being rate limited by Stripe, causing checkout failures.",
+      "true_cause": "payment-processor exceeded Stripe API rate limit of 100 requests/second due to a missing exponential",
+      "tool_sequence": [
+        "list_services",
+        "read_logs",
+        "read_logs",
+        "read_logs",
+        "read_logs",
+        "check_metric",
+        "check_metric",
+        "check_metric",
+        "submit_diagnosis"
+      ],
+      "scenario_id": "payment_gateway_rate_limit_001",
+      "difficulty": "medium"
+    },
+    {
+      "reward": 0.0899,
+      "steps": 8,
+      "queries_used": 6,
+      "elapsed_s": 9.3,
+      "submitted_service": "catalog-db",
+      "true_service": "catalog-service",
+      "service_correct": false,
+      "submitted_cause": "Increased load from catalog-service is causing high CPU and active connections on catalog-db",
+      "true_cause": "catalog-service v5.1.0 introduced an N+1 query bug in the product listing endpoint that bypasses the",
+      "tool_sequence": [
+        "list_services",
+        "read_logs",
+        "read_logs",
+        "read_logs",
+        "check_metric",
+        "check_metric",
+        "check_metric",
+        "submit_diagnosis"
+      ],
+      "scenario_id": "n_plus_one_cache_bypass_001",
+      "difficulty": "hard"
+    },
+    {
+      "reward": 0.0,
+      "steps": 7,
+      "queries_used": 5,
+      "elapsed_s": 8.1,
+      "submitted_service": "api-gateway",
+      "true_service": "session-db",
+      "service_correct": false,
+      "submitted_cause": "Elevated error rate observed in api-gateway, likely due to an underlying issue in one of the backend",
+      "true_cause": "session-db PostgreSQL connection timeout was silently changed from 30s to 300s via a config manageme",
+      "tool_sequence": [
+        "list_services",
+        "read_logs",
+        "read_logs",
+        "check_metric",
+        "check_metric",
+        "check_metric",
+        "submit_diagnosis"
+      ],
+      "scenario_id": "config_drift_gc_cascade_001",
+      "difficulty": "expert"
+    }
+  ],
+  "gemini/gemini-2.5-flash-preview-04-17": [
+    {
+      "reward": 0.0,
+      "error": "Error code: 404 - [{'error': {'code': 404, 'message': 'models/gemini-2.5-flash-preview-04-17 is not found for API version v1main, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.', 'status': 'NOT_FOUND'}}]",
+      "steps": 0,
+      "scenario_id": "redis_cache_node_failure_001",
+      "difficulty": "easy"
+    },
+    {
+      "reward": 0.0,
+      "error": "Error code: 404 - [{'error': {'code': 404, 'message': 'models/gemini-2.5-flash-preview-04-17 is not found for API version v1main, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.', 'status': 'NOT_FOUND'}}]",
+      "steps": 0,
+      "scenario_id": "worker_oom_memory_leak_001",
+      "difficulty": "medium"
+    },
+    {
+      "reward": 0.0,
+      "error": "Error code: 404 - [{'error': {'code': 404, 'message': 'models/gemini-2.5-flash-preview-04-17 is not found for API version v1main, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.', 'status': 'NOT_FOUND'}}]",
+      "steps": 0,
+      "scenario_id": "payment_gateway_rate_limit_001",
+      "difficulty": "medium"
+    },
+    {
+      "reward": 0.0,
+      "error": "Error code: 404 - [{'error': {'code': 404, 'message': 'models/gemini-2.5-flash-preview-04-17 is not found for API version v1main, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.', 'status': 'NOT_FOUND'}}]",
+      "steps": 0,
+      "scenario_id": "n_plus_one_cache_bypass_001",
+      "difficulty": "hard"
+    },
+    {
+      "reward": 0.0,
+      "error": "Error code: 404 - [{'error': {'code': 404, 'message': 'models/gemini-2.5-flash-preview-04-17 is not found for API version v1main, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.', 'status': 'NOT_FOUND'}}]",
+      "steps": 0,
+      "scenario_id": "config_drift_gc_cascade_001",
+      "difficulty": "expert"
+    }
+  ],
+  "gemini/gemini-2.5-pro-preview-03-25": [
+    {
+      "reward": 0.0,
+      "error": "Error code: 404 - [{'error': {'code': 404, 'message': 'models/gemini-2.5-pro-preview-03-25 is not found for API version v1main, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.', 'status': 'NOT_FOUND'}}]",
+      "steps": 0,
+      "scenario_id": "redis_cache_node_failure_001",
+      "difficulty": "easy"
+    },
+    {
+      "reward": 0.0,
+      "error": "Error code: 404 - [{'error': {'code': 404, 'message': 'models/gemini-2.5-pro-preview-03-25 is not found for API version v1main, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.', 'status': 'NOT_FOUND'}}]",
+      "steps": 0,
+      "scenario_id": "worker_oom_memory_leak_001",
+      "difficulty": "medium"
+    },
+    {
+      "reward": 0.0,
+      "error": "Error code: 404 - [{'error': {'code': 404, 'message': 'models/gemini-2.5-pro-preview-03-25 is not found for API version v1main, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.', 'status': 'NOT_FOUND'}}]",
+      "steps": 0,
+      "scenario_id": "payment_gateway_rate_limit_001",
+      "difficulty": "medium"
+    },
+    {
+      "reward": 0.0,
+      "error": "Error code: 404 - [{'error': {'code': 404, 'message': 'models/gemini-2.5-pro-preview-03-25 is not found for API version v1main, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.', 'status': 'NOT_FOUND'}}]",
+      "steps": 0,
+      "scenario_id": "n_plus_one_cache_bypass_001",
+      "difficulty": "hard"
+    },
+    {
+      "reward": 0.0,
+      "error": "Error code: 404 - [{'error': {'code': 404, 'message': 'models/gemini-2.5-pro-preview-03-25 is not found for API version v1main, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.', 'status': 'NOT_FOUND'}}]",
+      "steps": 0,
+      "scenario_id": "config_drift_gc_cascade_001",
+      "difficulty": "expert"
+    }
+  ]
+}

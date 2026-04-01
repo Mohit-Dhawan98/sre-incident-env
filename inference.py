@@ -72,13 +72,20 @@ Phase 4 - DIAGNOSE (1 call): Submit only when you can answer ALL THREE:
 - Check metrics on the suspected root cause, not just on the symptomatic services.
 
 # DIAGNOSIS FORMAT
-affected_service: The service where the root defect ORIGINATES (not the loudest symptom).
-root_cause: "[service] [specific mechanism: version/config/resource] caused [downstream effect chain]"
+When calling submit_diagnosis, provide ALL fields:
+- affected_service: The service where the root defect ORIGINATES (not the loudest symptom).
+- failure_type: Category from this taxonomy: oom_kill, connection_pool, connection_leak, config_drift, slow_external_api, gc_pressure, disk_full, n_plus_one_query, thread_pool_starvation, cert_expiry, cache_stampede, cache_node_failure, replication_lag, rate_limit_breach, dns_misconfiguration, thundering_herd_deploy, clock_skew_jwt, library_version_conflict, split_brain_db, circular_dependency_deadlock, bad_index_drop
+- root_cause: "[service] [mechanism] caused [downstream effect chain]"
+- causal_chain: Comma-separated service chain from root cause to visible symptom, e.g. "product-cache,checkout-service,api-gateway"
+- confidence: 0.0 to 1.0
 
-GOOD: "worker-pool memory leak in order deserialization caused repeated OOM kills, blocking order-service processing"
-GOOD: "product-cache Redis node cache-2 failed, forcing checkout-service into direct DB reads, overloading inventory-db"
-BAD: "order-service is failing" (that is a symptom, not a root cause)
-BAD: "database is overloaded" (too vague, no mechanism, possibly wrong service)
+GOOD diagnosis:
+  affected_service: "worker-pool"
+  failure_type: "oom_kill"
+  root_cause: "worker-pool memory leak in order deserialization caused repeated OOM kills"
+  causal_chain: "worker-pool,order-service,api-gateway"
+
+BAD: affected_service="api-gateway", failure_type="other" (symptom service, wrong type)
 """
 
 # ---------------------------------------------------------------------------
