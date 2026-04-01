@@ -28,6 +28,7 @@ dev = [
 
 [project.scripts]
 sre-incident-env = "server.app:main"
+server = "server.app:main"
 
 [tool.setuptools.packages.find]
 include = ["server*"]

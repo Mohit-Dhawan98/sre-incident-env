@@ -35,9 +35,9 @@ from openenv.core.env_server.mcp_types import CallToolAction, ListToolsAction
 # Configuration
 # ---------------------------------------------------------------------------
 
-API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
-API_KEY = os.getenv("API_KEY") or os.getenv("HF_TOKEN") or os.getenv("OPENAI_API_KEY")
-MODEL = os.getenv("MODEL_NAME") or os.getenv("MODEL", "gpt-4o")
+API_BASE_URL = os.getenv("API_BASE_URL") or "https://api.openai.com/v1"
+API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY") or os.getenv("OPENAI_API_KEY")
+MODEL = os.getenv("MODEL_NAME") or "gpt-4o"
 VERBOSE = True
 
 SYSTEM_PROMPT = """You are an expert Site Reliability Engineer investigating a production incident.
