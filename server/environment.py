@@ -239,9 +239,9 @@ class SREIncidentEnvironment(MCPEnvironment):
 
     @staticmethod
     def _budget_for_difficulty(difficulty: str) -> int:
-        # Flat budget — difficulty comes from scenario content, not resource constraints.
-        # A real SRE doesn't get fewer tools for harder incidents.
-        return 10
+        # Harder incidents get MORE budget — like a real P0 gets all hands.
+        # Difficulty comes from scenario content complexity, not resource starvation.
+        return {"easy": 8, "medium": 10, "hard": 12, "expert": 15}.get(difficulty, 10)
 
     def reset(
         self,
