@@ -1,0 +1,51 @@
+[
+  {
+    "reward": 0.0,
+    "error": "Error code: 401 - {'error': {'code': 'authentication_error', 'message': 'Invalid Anthropic API Key', 'type': 'invalid_request_error', 'param': None}}",
+    "steps": 1,
+    "scenario": "redis_cache_node_failure_001",
+    "diff": "easy"
+  },
+  {
+    "reward": 0.0,
+    "error": "Error code: 401 - {'error': {'code': 'authentication_error', 'message': 'Invalid Anthropic API Key', 'type': 'invalid_request_error', 'param': None}}",
+    "steps": 1,
+    "scenario": "worker_oom_memory_leak_001",
+    "diff": "easy"
+  },
+  {
+    "reward": 0.0,
+    "error": "Error code: 401 - {'error': {'code': 'authentication_error', 'message': 'Invalid Anthropic API Key', 'type': 'invalid_request_error', 'param': None}}",
+    "steps": 1,
+    "scenario": "cert_expiry_mutual_tls_001",
+    "diff": "medium"
+  },
+  {
+    "reward": 0.0,
+    "error": "Error code: 401 - {'error': {'code': 'authentication_error', 'message': 'Invalid Anthropic API Key', 'type': 'invalid_request_error', 'param': None}}",
+    "steps": 1,
+    "scenario": "payment_gateway_rate_limit_001",
+    "diff": "hard"
+  },
+  {
+    "reward": 0.0,
+    "error": "Error code: 401 - {'error': {'code': 'authentication_error', 'message': 'Invalid Anthropic API Key', 'type': 'invalid_request_error', 'param': None}}",
+    "steps": 1,
+    "scenario": "n_plus_one_cache_bypass_001",
+    "diff": "hard"
+  },
+  {
+    "reward": 0.0,
+    "error": "Error code: 401 - {'error': {'code': 'authentication_error', 'message': 'Invalid Anthropic API Key', 'type': 'invalid_request_error', 'param': None}}",
+    "steps": 1,
+    "scenario": "kernel_tcp_rmem_silent_drop_001",
+    "diff": "expert"
+  },
+  {
+    "reward": 0.0,
+    "error": "Error code: 401 - {'error': {'code': 'authentication_error', 'message': 'Invalid Anthropic API Key', 'type': 'invalid_request_error', 'param': None}}",
+    "steps": 1,
+    "scenario": "etcd_compaction_quota_alarm_001",
+    "diff": "expert"
+  }
+]
