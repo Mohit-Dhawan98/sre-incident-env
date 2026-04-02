@@ -39,7 +39,7 @@ API_BASE_URL = os.getenv("API_BASE_URL") or "https://api.openai.com/v1"
 API_KEY = os.getenv("OPENAI_API_KEY") or os.getenv("API_KEY") or os.getenv("HF_TOKEN")
 MODEL = os.getenv("MODEL_NAME") or "gpt-4o"
 MAX_STEPS = 20
-CONTEXT_SUMMARIZE_THRESHOLD = 25  # messages before we summarize old history
+CONTEXT_CHAR_LIMIT = 120000  # ~30k tokens — summarize when total chars exceed this
 VERBOSE = True
 
 SYSTEM_PROMPT = """You are an expert Site Reliability Engineer investigating a production incident.
@@ -126,7 +126,13 @@ def summarize_old_messages(messages: List[dict]) -> List[dict]:
     This preserves the finqa function-calling pattern for recent interactions
     while compressing old context.
     """
-    if len(messages) <= CONTEXT_SUMMARIZE_THRESHOLD:
+    total_chars = sum(len(str(m.get("content", ""))) for m in messages)
+    total_chars += sum(
+        len(tc.get("function", {}).get("arguments", ""))
+        for m in messages
+        for tc in (m.get("tool_calls") or [])
+    )
+    if total_chars <= CONTEXT_CHAR_LIMIT:
         return messages
 
     system_msg = messages[0]

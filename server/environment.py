@@ -241,7 +241,7 @@ class SREIncidentEnvironment(MCPEnvironment):
     def _budget_for_difficulty(difficulty: str) -> int:
         # Harder incidents get MORE budget — like a real P0 gets all hands.
         # Difficulty comes from scenario content complexity, not resource starvation.
-        return {"easy": 8, "medium": 10, "hard": 12, "expert": 15}.get(difficulty, 10)
+        return {"easy": 20, "medium": 25, "hard": 30, "expert": 40}.get(difficulty, 25)
 
     def reset(
         self,
