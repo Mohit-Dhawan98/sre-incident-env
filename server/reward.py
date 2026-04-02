@@ -27,16 +27,18 @@ Uses all-mpnet-base-v2 for semantic similarity — runs locally, no API calls.
 
 from typing import Any, Dict, List, Set, Tuple
 
-from sentence_transformers import SentenceTransformer, util
-
-_model = None
-
-
-def _get_model() -> SentenceTransformer:
-    global _model
-    if _model is None:
-        _model = SentenceTransformer("sentence-transformers/all-mpnet-base-v2")
-    return _model
+# Embedding model commented out — using pure Jaccard for explanation grading.
+# Jaccard is more precise: rewards specific keywords, fully deterministic,
+# no model loading, no GPU dependency.
+# To re-enable: uncomment and set embedding_score weight in Component 3.
+#
+# from sentence_transformers import SentenceTransformer, util
+# _model = None
+# def _get_model() -> SentenceTransformer:
+#     global _model
+#     if _model is None:
+#         _model = SentenceTransformer("sentence-transformers/all-mpnet-base-v2")
+#     return _model
 
 
 def _get_neighbors(service: str, services_graph: Dict[str, Any]) -> Set[str]:
@@ -167,13 +169,12 @@ def compute_reward(
         if not submitted_text:
             semantic_score = 0.0
         else:
-            # Part A: Embedding similarity (0.10)
-            model = _get_model()
-            emb_sub = model.encode(submitted_text, convert_to_tensor=True)
-            emb_true = model.encode(true_root_cause, convert_to_tensor=True)
-            sim = float(util.cos_sim(emb_sub, emb_true).item())
-            raw = max(0.0, (sim - 0.60) / 0.40)
-            curved = raw ** 1.5
+            # Part A: Embedding similarity — COMMENTED OUT
+            # Pure Jaccard is more precise for our use case:
+            # - Rewards specific technical vocabulary
+            # - Doesn't give false credit for "sounds similar but wrong"
+            # - Fully deterministic, no model loading needed
+            # embedding_score = 0.0  # disabled
 
             # Length penalty
             text_len = len(submitted_text)
@@ -184,9 +185,7 @@ def compute_reward(
             else:
                 length_factor = 1.0
 
-            embedding_score = curved * length_factor * 0.10
-
-            # Part B: Keyword/Jaccard overlap (0.10)
+            # Keyword/Jaccard overlap (0.20 — full weight)
             # Extract significant words (3+ chars, not stopwords)
             stopwords = {'the', 'and', 'was', 'for', 'that', 'with', 'from',
                          'this', 'are', 'were', 'been', 'has', 'had', 'not',
@@ -204,15 +203,15 @@ def compute_reward(
             sub_kw = extract_keywords(submitted_text)
 
             if true_kw:
-                # Jaccard-like: intersection / union
+                # Jaccard: intersection / union
                 intersection = len(true_kw & sub_kw)
                 union = len(true_kw | sub_kw)
                 jaccard = intersection / union if union > 0 else 0
-                keyword_score = jaccard * 0.10
+                keyword_score = jaccard * length_factor * 0.20
             else:
                 keyword_score = 0.0
 
-            semantic_score = embedding_score + keyword_score
+            semantic_score = keyword_score
 
         # ── Component 4: Causal Chain Validity (0.10) ────────────────
         # Compared against golden causal_chain from scenario.
