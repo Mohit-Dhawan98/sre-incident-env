@@ -204,6 +204,7 @@ class SREIncidentEnvironment(MCPEnvironment):
                 submitted_chain=chain_list,
                 services_graph=self._scenario["services"],
                 tool_call_history=self._tool_call_history,
+                true_causal_chain=self._scenario["failure"].get("causal_chain", []),
             )
 
             self._done = True

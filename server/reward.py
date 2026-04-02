@@ -111,6 +111,7 @@ def compute_reward(
     submitted_chain: List[str] = (),
     services_graph: Dict[str, Any] = None,
     tool_call_history: List[Tuple[str, str]] = (),
+    true_causal_chain: List[str] = (),
 ) -> float:
     """Compute ungameable + learnable reward for incident diagnosis.
 
@@ -180,18 +181,35 @@ def compute_reward(
             semantic_score = curved * length_factor * 0.20
 
         # ── Component 4: Causal Chain Validity (0.10) ────────────────
-        # Edge-fraction: score = valid_edges / total_edges
+        # Compared against golden causal_chain from scenario.
+        # Score = overlap between submitted chain and true chain.
         chain_score = 0.0
         if submitted_chain and len(submitted_chain) >= 1:
             chain_lower = [s.strip().lower() for s in submitted_chain]
-            all_lower = {s.lower() for s in all_services}
 
-            starts_with_root = chain_lower[0] == true_svc
-            all_real = all(s in all_lower for s in chain_lower)
-            no_dupes = len(chain_lower) == len(set(chain_lower))
+            if true_causal_chain:
+                # Compare against golden chain
+                true_chain_lower = [s.strip().lower() for s in true_causal_chain]
+                true_chain_set = set(true_chain_lower)
 
-            if starts_with_root and all_real and no_dupes:
-                if services_graph:
+                starts_with_root = chain_lower[0] == true_svc
+                # What fraction of the true chain did the agent capture?
+                submitted_set = set(chain_lower)
+                overlap = len(submitted_set & true_chain_set)
+                precision = overlap / len(submitted_set) if submitted_set else 0
+                recall = overlap / len(true_chain_set) if true_chain_set else 0
+
+                if starts_with_root and precision > 0 and recall > 0:
+                    # F1-like score: harmonic mean of precision and recall
+                    f1 = 2 * precision * recall / (precision + recall)
+                    chain_score = f1 * 0.10
+            elif services_graph:
+                # Fallback: validate edges against graph
+                all_lower = {s.lower() for s in all_services}
+                starts_with_root = chain_lower[0] == true_svc
+                all_real = all(s in all_lower for s in chain_lower)
+                no_dupes = len(chain_lower) == len(set(chain_lower))
+                if starts_with_root and all_real and no_dupes:
                     graph_lower = {}
                     for svc_name, svc_info in services_graph.items():
                         graph_lower[svc_name.lower()] = [
@@ -200,21 +218,13 @@ def compute_reward(
                     total_edges = len(chain_lower) - 1
                     valid_edges = 0
                     for i in range(total_edges):
-                        svc_from = chain_lower[i]
-                        svc_to = chain_lower[i + 1]
-                        # Failure propagates: svc_from fails → svc_to (caller) is affected.
-                        # svc_to calls svc_from, meaning svc_to is in svc_from's upstream list.
-                        upstream_of_from = graph_lower.get(svc_from, [])
-                        if svc_to in upstream_of_from:
+                        upstream_of_from = graph_lower.get(chain_lower[i], [])
+                        if chain_lower[i + 1] in upstream_of_from:
                             valid_edges += 1
                     if total_edges > 0:
                         chain_score = (valid_edges / total_edges) * 0.10
                     else:
-                        # Single-service chain (root is leaf node) — valid
                         chain_score = 0.10
-                else:
-                    # No graph — basic validation only
-                    chain_score = 0.10
 
     # ══════════════════════════════════════════════════════════════════
     # TIER 2: INVESTIGATION QUALITY (0.30) — NOT gated on diagnosis
@@ -265,8 +275,14 @@ def compute_reward(
 
     # ── Component 6: Investigation Breadth (0.15) ────────────────────
     # Rewards querying services in the causal chain. Penalizes spray-and-pray.
-    if services_graph and services_queried:
-        causal_services = _get_causal_chain_services(true_root_service, services_graph)
+    if services_queried:
+        # Use golden causal chain if available, else BFS fallback
+        if true_causal_chain:
+            causal_services = {s.lower() for s in true_causal_chain}
+        elif services_graph:
+            causal_services = _get_causal_chain_services(true_root_service, services_graph)
+        else:
+            causal_services = {true_root_service.lower()}
         queried_lower = {s.lower() for s in services_queried}
 
         # How many causal-chain services did you investigate?
