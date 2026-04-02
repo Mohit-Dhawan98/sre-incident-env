@@ -38,7 +38,7 @@ from openai import OpenAI
 API_BASE_URL = os.getenv("API_BASE_URL") or "https://api.openai.com/v1"
 API_KEY = os.getenv("OPENAI_API_KEY") or os.getenv("API_KEY") or os.getenv("HF_TOKEN")
 MODEL = os.getenv("MODEL_NAME") or "gpt-4o"
-MAX_STEPS = 50
+MAX_STEPS = 100  # Match env budget — let the env handle termination
 CONTEXT_CHAR_LIMIT = 120000  # ~30k tokens — summarize when total chars exceed this
 VERBOSE = True
 
