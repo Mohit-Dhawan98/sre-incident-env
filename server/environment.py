@@ -69,13 +69,11 @@ class SREIncidentEnvironment(MCPEnvironment):
                 return json.dumps({
                     "services": services,
                     "dependency_graph": graph,
-                    "queries_remaining": self._query_budget - self._queries_used,
-                })
+                                    })
 
             return json.dumps({
                 "services": services,
-                "queries_remaining": self._query_budget - self._queries_used,
-            })
+                            })
 
         @mcp.tool
         def read_logs(
@@ -83,7 +81,7 @@ class SREIncidentEnvironment(MCPEnvironment):
             window_minutes: int = 5,
             level_filter: Optional[str] = None,
         ) -> str:
-            """Read logs for a specific service. Costs 1 query from your budget.
+            """Read logs for a specific service.
 
             Args:
                 service: Service name to query logs for.
@@ -109,14 +107,12 @@ class SREIncidentEnvironment(MCPEnvironment):
                 return json.dumps({
                     "logs": [],
                     "message": f"No logs found for service '{service}'",
-                    "queries_remaining": self._query_budget - self._queries_used,
-                })
+                                    })
 
             return json.dumps({
                 "logs": [l.model_dump() for l in logs],
                 "count": len(logs),
-                "queries_remaining": self._query_budget - self._queries_used,
-            })
+                            })
 
         @mcp.tool
         def check_metric(
@@ -124,7 +120,7 @@ class SREIncidentEnvironment(MCPEnvironment):
             metric: str,
             window_minutes: int = 10,
         ) -> str:
-            """Check a metric time-series for a specific service. Costs 1 query.
+            """Check a metric time-series for a specific service.
 
             Args:
                 service: Service name to check metrics for.
@@ -152,16 +148,14 @@ class SREIncidentEnvironment(MCPEnvironment):
                     "metric_series": [],
                     "message": f"Metric '{metric}' not found for '{service}'",
                     "available_metrics": available if available else f"No metrics for '{service}'",
-                    "queries_remaining": self._query_budget - self._queries_used,
-                })
+                                    })
 
             return json.dumps({
                 "metric": metric,
                 "service": service,
                 "metric_series": [p.model_dump() for p in series],
                 "points": len(series),
-                "queries_remaining": self._query_budget - self._queries_used,
-            })
+                            })
 
         @mcp.tool
         def submit_diagnosis(
@@ -221,8 +215,6 @@ class SREIncidentEnvironment(MCPEnvironment):
                 "reward": reward,
                 "done": True,
                 "message": f"Diagnosis submitted. Reward: {reward:.4f}",
-                "queries_used": self._queries_used,
-                "query_budget": self._query_budget,
             })
 
     def _use_query(self) -> Optional[str]:
@@ -286,13 +278,12 @@ class SREIncidentEnvironment(MCPEnvironment):
             metadata={
                 "message": (
                     f"[INCIDENT ALERT] {self._scenario['title']}\n"
-                    f"Severity detected. You have {self._query_budget} queries to investigate.\n"
+                    f"Severity detected. Investigate using the available tools.\n"
                     f"Use list_services to see available services, then read_logs and check_metric to investigate.\n"
                     f"Submit your diagnosis with submit_diagnosis when ready."
                 ),
                 "scenario_id": self._scenario["id"],
                 "difficulty": difficulty,
-                "query_budget": self._query_budget,
             },
         )
 

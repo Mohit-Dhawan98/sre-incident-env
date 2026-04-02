@@ -68,7 +68,6 @@ Phase 4 - DIAGNOSE (1 call): Submit only when you can answer ALL THREE:
   originates in service-B. Investigate service-B, do not blame service-A.
 - The service with the MOST VISIBLE errors is usually a VICTIM, not the cause.
 - RED HERRINGS exist: some services show coincidental degradation. Ignore if unconnected.
-- Budget your queries: ~40% scanning logs, ~40% checking metrics, save 1 for diagnosis.
 - NEVER repeat a tool call with identical arguments.
 
 # DIAGNOSIS FORMAT
