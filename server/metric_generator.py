@@ -1,9 +1,8 @@
 """Procedural metric time-series generation from scenario templates."""
 
-import math
 import random
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 from models import MetricPoint
 
@@ -22,7 +21,7 @@ class MetricGenerator:
         for service, metrics in self.scenario["metric_templates"].items():
             for metric_name, config in metrics.items():
                 points = self._generate_series(config)
-                self.series[(service, metric_name)] = points
+                self.series[(service.lower(), metric_name.lower())] = points
 
     def _generate_series(self, config: Dict[str, Any]) -> List[MetricPoint]:
         total_points = (self.duration_minutes * 60) // self.resolution_seconds
@@ -111,9 +110,13 @@ class MetricGenerator:
         window_minutes: int = 10,
     ) -> List[MetricPoint]:
         """Return metric series for a service within a time window."""
-        key = (service, metric)
+        # Case-insensitive lookup
+        key = (service.lower(), metric.lower())
         if key not in self.series:
-            return []
+            # Try original case as fallback
+            key = (service, metric)
+            if key not in self.series:
+                return []
 
         all_points = self.series[key]
         if not all_points:
@@ -132,5 +135,5 @@ class MetricGenerator:
         return [
             metric_name
             for (svc, metric_name) in self.series
-            if svc == service
+            if svc == service.lower()
         ]

@@ -82,7 +82,7 @@ class LogGenerator:
         results = []
         for entry in self.entries:
             # Filter by service
-            if entry.service != service:
+            if entry.service.lower() != service.lower():
                 continue
             # Filter by time window
             if entry.timestamp < start_str or entry.timestamp > end_str:
@@ -102,7 +102,7 @@ class LogGenerator:
         """Return all logs for a service (full episode timeline)."""
         results = []
         for entry in self.entries:
-            if entry.service != service:
+            if entry.service.lower() != service.lower():
                 continue
             if level_filter and entry.level != level_filter.upper():
                 continue

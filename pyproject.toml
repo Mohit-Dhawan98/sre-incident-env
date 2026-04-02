@@ -17,6 +17,7 @@ dependencies = [
     "fastmcp>=3.0.0",
     "openai>=2.7.2",
     "requests>=2.31.0",
+    "python-dotenv>=1.0.0",
 ]
 
 [project.optional-dependencies]

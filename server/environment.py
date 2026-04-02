@@ -55,6 +55,8 @@ class SREIncidentEnvironment(MCPEnvironment):
             """List all services involved in the current incident. Free action (no query cost)."""
             if self._scenario is None:
                 return json.dumps({"error": "No episode active. Call reset() first."})
+            if self._done:
+                return json.dumps({"error": "Episode is over."})
             services = list(self._scenario["services"].keys())
             random.shuffle(services)
 
@@ -91,12 +93,13 @@ class SREIncidentEnvironment(MCPEnvironment):
             if self._done:
                 return json.dumps({"error": "Episode is over."})
 
-            self._services_queried.add(service)
-            self._tool_call_history.append(("read_logs", service))
-
             budget_result = self._use_query()
             if budget_result:
                 return budget_result
+
+            # Track AFTER budget check so failed queries don't inflate history
+            self._services_queried.add(service)
+            self._tool_call_history.append(("read_logs", service))
 
             if self._log_gen is None:
                 return json.dumps({"error": "No episode active."})
@@ -131,12 +134,13 @@ class SREIncidentEnvironment(MCPEnvironment):
             if self._done:
                 return json.dumps({"error": "Episode is over."})
 
-            self._services_queried.add(service)
-            self._tool_call_history.append(("check_metric", service))
-
             budget_result = self._use_query()
             if budget_result:
                 return budget_result
+
+            # Track AFTER budget check
+            self._services_queried.add(service)
+            self._tool_call_history.append(("check_metric", service))
 
             if self._metric_gen is None:
                 return json.dumps({"error": "No episode active."})
