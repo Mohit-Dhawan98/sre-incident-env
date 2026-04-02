@@ -31,7 +31,7 @@ _model = None
 def _get_model() -> SentenceTransformer:
     global _model
     if _model is None:
-        _model = SentenceTransformer("google/embeddinggemma-300m")
+        _model = SentenceTransformer("sentence-transformers/all-mpnet-base-v2")
     return _model
 
 

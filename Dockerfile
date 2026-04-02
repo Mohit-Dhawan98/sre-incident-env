@@ -22,17 +22,16 @@ RUN pip install --no-cache-dir \
     "requests>=2.31.0" \
     "python-dotenv"
 
-# Pre-download embedding model at build time (needs HF_TOKEN for gated model)
-ARG HF_TOKEN=""
-ENV HF_TOKEN=${HF_TOKEN}
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('google/embeddinggemma-300m')"
+# Pre-download embedding model at build time (non-gated, no auth needed)
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('sentence-transformers/all-mpnet-base-v2')"
 
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH="/app:$PYTHONPATH"
 
 EXPOSE 8000
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
 
+ENV ENABLE_WEB_INTERFACE=true
 CMD ["uvicorn", "server.app:app", "--host", "0.0.0.0", "--port", "8000"]
