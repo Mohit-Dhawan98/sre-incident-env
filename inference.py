@@ -171,6 +171,7 @@ async def run_episode(
     step_count = 0
     max_steps = 20
     done = False
+    consecutive_text = 0  # Track text-only responses to prevent loops
 
     while not done and step_count < max_steps:
         step_count += 1
@@ -199,18 +200,29 @@ async def run_episode(
 
         # Handle function call
         if message.tool_calls:
+            consecutive_text = 0  # Reset on successful tool call
             tool_call = message.tool_calls[0]
             tool_name = tool_call.function.name
             tool_args = json.loads(tool_call.function.arguments)
             tool_call_id = tool_call.id
         elif message.content:
+            consecutive_text += 1
             if VERBOSE:
                 print(f"    [text] {message.content[:80]}")
             chat_history.append({"role": "assistant", "content": message.content})
-            chat_history.append({
-                "role": "user",
-                "content": "Please use one of the available tools to continue investigating.",
-            })
+
+            if consecutive_text >= 3:
+                # Model is stuck — force it to submit or give up
+                chat_history.append({
+                    "role": "user",
+                    "content": "You must submit your diagnosis NOW using submit_diagnosis. "
+                               "If you cannot determine the root cause, submit your best guess.",
+                })
+            else:
+                chat_history.append({
+                    "role": "user",
+                    "content": "Please use one of the available tools to continue investigating.",
+                })
             continue
         else:
             continue

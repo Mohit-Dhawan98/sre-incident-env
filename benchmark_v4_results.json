@@ -1,0 +1,221 @@
+{
+  "o4-mini": [
+    {
+      "reward": 0.7298,
+      "steps": 11,
+      "scenario": "redis_cache_node_failure_001",
+      "diff": "easy",
+      "elapsed": 59.4
+    },
+    {
+      "reward": 0.255,
+      "steps": 12,
+      "scenario": "worker_oom_memory_leak_001",
+      "diff": "medium",
+      "elapsed": 27.4
+    },
+    {
+      "reward": 0.8322,
+      "steps": 11,
+      "scenario": "payment_gateway_rate_limit_001",
+      "diff": "medium",
+      "elapsed": 26.4
+    },
+    {
+      "reward": 0.7126,
+      "steps": 9,
+      "scenario": "n_plus_one_cache_bypass_001",
+      "diff": "medium",
+      "elapsed": 31.0
+    },
+    {
+      "reward": 0.8976,
+      "steps": 9,
+      "scenario": "config_drift_gc_cascade_001",
+      "diff": "hard",
+      "elapsed": 26.9
+    },
+    {
+      "reward": 0.6798,
+      "steps": 9,
+      "scenario": "slow_external_api_vendor_001",
+      "diff": "hard",
+      "elapsed": 21.9
+    },
+    {
+      "reward": 0.8386,
+      "steps": 9,
+      "scenario": "disk_full_wal_corruption_001",
+      "diff": "hard",
+      "elapsed": 20.6
+    },
+    {
+      "reward": 0.225,
+      "steps": 7,
+      "scenario": "kafka_partition_rebalance_storm_001",
+      "diff": "expert",
+      "elapsed": 18.7
+    },
+    {
+      "reward": 0.8412,
+      "steps": 7,
+      "scenario": "memory_mapped_file_corruption_001",
+      "diff": "expert",
+      "elapsed": 18.2
+    },
+    {
+      "reward": 0.7156,
+      "steps": 7,
+      "scenario": "tls_cert_chain_propagation_001",
+      "diff": "expert",
+      "elapsed": 16.4
+    }
+  ],
+  "gpt-4o": [
+    {
+      "reward": 0.15,
+      "steps": 8,
+      "scenario": "redis_cache_node_failure_001",
+      "diff": "easy",
+      "elapsed": 13.0
+    },
+    {
+      "reward": 0.0,
+      "error": "max_turns",
+      "steps": 20,
+      "scenario": "worker_oom_memory_leak_001",
+      "diff": "medium",
+      "elapsed": 27.2
+    },
+    {
+      "reward": 0.5812,
+      "steps": 10,
+      "scenario": "payment_gateway_rate_limit_001",
+      "diff": "medium",
+      "elapsed": 13.7
+    },
+    {
+      "reward": 0.7395,
+      "steps": 11,
+      "scenario": "n_plus_one_cache_bypass_001",
+      "diff": "medium",
+      "elapsed": 16.8
+    },
+    {
+      "reward": 0.38,
+      "steps": 13,
+      "scenario": "config_drift_gc_cascade_001",
+      "diff": "hard",
+      "elapsed": 20.0
+    },
+    {
+      "reward": 0.7235,
+      "steps": 8,
+      "scenario": "slow_external_api_vendor_001",
+      "diff": "hard",
+      "elapsed": 9.2
+    },
+    {
+      "reward": 0.0,
+      "steps": 10,
+      "scenario": "disk_full_wal_corruption_001",
+      "diff": "hard",
+      "elapsed": 18.0
+    },
+    {
+      "reward": 0.2437,
+      "steps": 7,
+      "scenario": "kafka_partition_rebalance_storm_001",
+      "diff": "expert",
+      "elapsed": 11.7
+    },
+    {
+      "reward": 0.195,
+      "steps": 8,
+      "scenario": "memory_mapped_file_corruption_001",
+      "diff": "expert",
+      "elapsed": 12.1
+    },
+    {
+      "reward": 0.225,
+      "steps": 6,
+      "scenario": "tls_cert_chain_propagation_001",
+      "diff": "expert",
+      "elapsed": 8.6
+    }
+  ],
+  "gemini-2.5-flash": [
+    {
+      "reward": 0.7696,
+      "steps": 11,
+      "scenario": "redis_cache_node_failure_001",
+      "diff": "easy",
+      "elapsed": 58.0
+    },
+    {
+      "reward": 0.255,
+      "steps": 13,
+      "scenario": "worker_oom_memory_leak_001",
+      "diff": "medium",
+      "elapsed": 51.1
+    },
+    {
+      "reward": 0.7772,
+      "steps": 9,
+      "scenario": "payment_gateway_rate_limit_001",
+      "diff": "medium",
+      "elapsed": 40.6
+    },
+    {
+      "reward": 0.6213,
+      "steps": 10,
+      "scenario": "n_plus_one_cache_bypass_001",
+      "diff": "medium",
+      "elapsed": 30.6
+    },
+    {
+      "reward": 0.3175,
+      "steps": 8,
+      "scenario": "config_drift_gc_cascade_001",
+      "diff": "hard",
+      "elapsed": 29.3
+    },
+    {
+      "reward": 0.7576,
+      "steps": 12,
+      "scenario": "slow_external_api_vendor_001",
+      "diff": "hard",
+      "elapsed": 60.1
+    },
+    {
+      "reward": 0.3586,
+      "steps": 9,
+      "scenario": "disk_full_wal_corruption_001",
+      "diff": "hard",
+      "elapsed": 35.6
+    },
+    {
+      "reward": 0.0,
+      "error": "max_turns",
+      "steps": 20,
+      "scenario": "kafka_partition_rebalance_storm_001",
+      "diff": "expert",
+      "elapsed": 107.1
+    },
+    {
+      "reward": 0.0,
+      "error": "max_turns",
+      "steps": 20,
+      "scenario": "memory_mapped_file_corruption_001",
+      "diff": "expert",
+      "elapsed": 58.9
+    },
+    {
+      "reward": 0.225,
+      "steps": 8,
+      "scenario": "tls_cert_chain_propagation_001",
+      "diff": "expert",
+      "elapsed": 34.1
+    }
+  ]
+}
