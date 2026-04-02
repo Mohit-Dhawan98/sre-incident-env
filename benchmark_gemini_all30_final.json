@@ -1,0 +1,190 @@
+[
+  {
+    "reward": 0.8324,
+    "steps": 14,
+    "scenario": "redis_cache_node_failure_001",
+    "diff": "medium"
+  },
+  {
+    "reward": 0.7819,
+    "steps": 6,
+    "scenario": "worker_oom_memory_leak_001",
+    "diff": "easy"
+  },
+  {
+    "reward": 0.8525,
+    "steps": 12,
+    "scenario": "payment_gateway_rate_limit_001",
+    "diff": "easy"
+  },
+  {
+    "reward": 0.6265,
+    "steps": 4,
+    "scenario": "n_plus_one_cache_bypass_001",
+    "diff": "medium"
+  },
+  {
+    "reward": 0.0,
+    "error": "max_turns",
+    "steps": 20,
+    "scenario": "config_drift_gc_cascade_001",
+    "diff": "hard"
+  },
+  {
+    "reward": 0.7275,
+    "steps": 4,
+    "scenario": "thread_pool_starvation_001",
+    "diff": "easy"
+  },
+  {
+    "reward": 0.695,
+    "steps": 9,
+    "scenario": "replication_lag_stale_reads_001",
+    "diff": "medium"
+  },
+  {
+    "reward": 0.241,
+    "steps": 20,
+    "scenario": "cert_expiry_mutual_tls_001",
+    "diff": "easy"
+  },
+  {
+    "reward": 0.37,
+    "steps": 12,
+    "scenario": "slow_external_api_vendor_001",
+    "diff": "medium"
+  },
+  {
+    "reward": 0.749,
+    "steps": 12,
+    "scenario": "disk_full_wal_corruption_001",
+    "diff": "medium"
+  },
+  {
+    "reward": 0.3517,
+    "steps": 15,
+    "scenario": "cache_stampede_cold_start_001",
+    "diff": "medium"
+  },
+  {
+    "reward": 0.7072,
+    "steps": 8,
+    "scenario": "gc_pressure_heap_exhaustion_001",
+    "diff": "medium"
+  },
+  {
+    "reward": 0.6288,
+    "steps": 4,
+    "scenario": "connection_leak_fd_exhaustion_001",
+    "diff": "medium"
+  },
+  {
+    "reward": 0.772,
+    "steps": 10,
+    "scenario": "index_drop_query_degradation_001",
+    "diff": "hard"
+  },
+  {
+    "reward": 0.0,
+    "error": "max_turns",
+    "steps": 20,
+    "scenario": "dns_misconfiguration_split_resolution_001",
+    "diff": "hard"
+  },
+  {
+    "reward": 0.0,
+    "error": "max_turns",
+    "steps": 20,
+    "scenario": "thundering_herd_deploy_cache_miss_001",
+    "diff": "hard"
+  },
+  {
+    "reward": 0.7563,
+    "steps": 15,
+    "scenario": "clock_skew_jwt_rejection_001",
+    "diff": "hard"
+  },
+  {
+    "reward": 0.8279,
+    "steps": 5,
+    "scenario": "library_version_conflict_serialization_001",
+    "diff": "hard"
+  },
+  {
+    "reward": 0.7936,
+    "steps": 14,
+    "scenario": "split_brain_primary_election_001",
+    "diff": "hard"
+  },
+  {
+    "reward": 0.41,
+    "steps": 5,
+    "scenario": "circular_deadlock_service_dependency_001",
+    "diff": "hard"
+  },
+  {
+    "reward": 0.7189,
+    "steps": 8,
+    "scenario": "connection_pool_leak_cascading_001",
+    "diff": "medium"
+  },
+  {
+    "reward": 0.0,
+    "error": "max_turns",
+    "steps": 20,
+    "scenario": "kafka_partition_rebalance_storm_001",
+    "diff": "hard"
+  },
+  {
+    "reward": 0.3725,
+    "steps": 14,
+    "scenario": "memory_mapped_file_corruption_001",
+    "diff": "medium"
+  },
+  {
+    "reward": 0.0,
+    "error": "max_turns",
+    "steps": 20,
+    "scenario": "tls_cert_chain_propagation_001",
+    "diff": "medium"
+  },
+  {
+    "reward": 0.0,
+    "error": "max_turns",
+    "steps": 20,
+    "scenario": "raft_log_compaction_stall_001",
+    "diff": "medium"
+  },
+  {
+    "reward": 0.0,
+    "error": "max_turns",
+    "steps": 20,
+    "scenario": "no_timeout_vendor_degradation_h001",
+    "diff": "hard"
+  },
+  {
+    "reward": 0.285,
+    "steps": 5,
+    "scenario": "wal_archive_disk_full_h002",
+    "diff": "hard"
+  },
+  {
+    "reward": 0.0,
+    "error": "max_turns",
+    "steps": 20,
+    "scenario": "kernel_tcp_rmem_silent_drop_001",
+    "diff": "expert"
+  },
+  {
+    "reward": 0.341,
+    "steps": 20,
+    "scenario": "etcd_compaction_quota_alarm_001",
+    "diff": "expert"
+  },
+  {
+    "reward": 0.6722,
+    "steps": 14,
+    "scenario": "iptables_race_conntrack_drop_001",
+    "diff": "expert"
+  }
+]
