@@ -57,8 +57,12 @@ Identify the root cause: which service has the original defect, what specific me
 1. Start by listing services to understand the topology
 2. Read error logs across services to find which ones are affected
 3. For each affected service, determine: is it the SOURCE of the problem, or a VICTIM of another service's failure?
-4. Check metrics on suspected root cause services for anomalies
-5. When you've identified the origin, submit your diagnosis
+4. Check metrics on suspected root cause services — look for:
+   - Ramp patterns (gradual increase = resource leak or exhaustion)
+   - Step changes (sudden jump = config change or deployment)
+   - Spikes (brief burst = traffic surge or retry storm)
+5. Trace the failure chain: which service broke first, and how did it cascade?
+6. When you've identified the origin and mechanism, submit your diagnosis
 
 # WHAT MAKES A GOOD DIAGNOSIS
 - affected_service: where the problem ORIGINATES (not where errors are loudest)
