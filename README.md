@@ -9,34 +9,27 @@ app_port: 8000
 
 # SRE Incident Response Environment
 
-An OpenEnv-compliant reinforcement learning environment that simulates on-call Site Reliability Engineering. An AI agent receives a production incident alert, investigates by querying service logs and metrics across a multi-service architecture, reasons about causality through red herrings and cascading failures, and submits a root-cause diagnosis. The environment scores it automatically using embedding-based semantic similarity — zero LLM calls at runtime.
+An OpenEnv RL environment that simulates on-call Site Reliability Engineering. An AI agent receives a production incident alert, investigates by querying service logs and metrics across a multi-service architecture, traces causal chains through red herrings and cascading failures, and submits a root-cause diagnosis. The environment scores it automatically — zero LLM calls at runtime, fully deterministic.
 
 ## Quick Start
 
 ```bash
-# Install
-pip install git+https://huggingface.co/spaces/<org>/sre-incident-env
-
-# Or clone and install locally
-git clone <repo-url> && cd sre-incident-env
-uv sync
-
-# Run the baseline agent
-export OPENAI_API_KEY=your_key
-python inference.py --difficulty medium --episodes 3
+pip install git+https://huggingface.co/spaces/Maverick98/sre-incident-env
 ```
 
 ```python
 from client import SREIncidentEnv
 
-with SREIncidentEnv(base_url="http://localhost:8000") as env:
-    env.reset(difficulty="medium")
-    tools = env.list_tools()
-    result = env.call_tool("list_services")
-    result = env.call_tool("read_logs", service="api-gateway", window_minutes=10)
-    result = env.call_tool("submit_diagnosis",
-        root_cause="Redis node failure caused cache stampede",
+async with SREIncidentEnv(base_url="https://Maverick98-sre-incident-env.hf.space") as env:
+    await env.reset(difficulty="medium")
+    tools = await env.list_tools()
+    result = await env.call_tool("list_services")
+    result = await env.call_tool("read_logs", service="api-gateway", window_minutes=10)
+    result = await env.call_tool("submit_diagnosis",
         affected_service="product-cache",
+        failure_type="cache_node_failure",
+        root_cause="product-cache node failed causing checkout fallback",
+        causal_chain="product-cache,checkout-service,api-gateway",
         confidence=0.85)
 ```
 
@@ -44,66 +37,56 @@ with SREIncidentEnv(base_url="http://localhost:8000") as env:
 
 The environment exposes 4 MCP tools:
 
-| Tool | Cost | Description |
-|------|------|-------------|
-| `list_services` | Free | Returns service names in the incident topology |
-| `read_logs(service, window_minutes, level_filter)` | 1 query | Returns log entries for a service |
-| `check_metric(service, metric, window_minutes)` | 1 query | Returns metric time-series (30s resolution) |
-| `submit_diagnosis(root_cause, affected_service, confidence)` | Ends episode | Submits root-cause diagnosis, returns reward |
+| Tool | Description |
+|------|-------------|
+| `list_services` | Returns service names in the incident topology |
+| `read_logs(service, window_minutes, level_filter)` | Returns log entries for a service |
+| `check_metric(service, metric, window_minutes)` | Returns metric time-series (30s resolution) |
+| `submit_diagnosis(affected_service, failure_type, root_cause, causal_chain, confidence)` | Submits diagnosis, returns reward, ends episode |
 
-**Observation** after each tool call includes the tool result and `queries_remaining` countdown.
-
-**Episode ends** when: the agent calls `submit_diagnosis`, OR the query budget is exhausted (reward = 0).
+The agent has a generous query budget (100) — difficulty comes from scenario content, not resource constraints.
 
 ## Difficulty Tiers
 
-| Tier | Query Budget | Red Herrings | Causal Hops | Metric-Log Tension | Special |
-|------|-------------|--------------|-------------|-------------------|---------|
-| easy | 15 | 0 | 2 | No | Dependency graph shown |
-| medium | 10 | 1 | 2-3 | No | Deploy red herring |
-| hard | 7 | 2 | 3-4 | Yes | Logs and metrics disagree |
-| expert | 5 | 3 | 4+ | Yes | + phantom service in logs |
+| Tier | Scenarios | What Makes It Hard |
+|------|-----------|-------------------|
+| **Easy** | 5 | Root service has clear error logs, familiar failure patterns |
+| **Medium** | 5 | Root visible but misleading red herrings, multiple suspects |
+| **Hard** | 5 | Root service invisible (0 error logs), deep causal chains (4-5 hops), obscure mechanisms |
+| **Expert** | 5 | Root invisible + no metric clues + 9 services + 3 red herrings sharing symptoms |
 
-## Reward Function
+Difficulty is calibrated using joint consensus of o4-mini and gemini-2.5-flash benchmarks. Hard/expert scenarios feature real production failure patterns: cgroup sidecar OOM, BGP asymmetric routing, JVM metaspace exhaustion, CPU TSC drift, NUMA cross-socket latency.
 
-5-component reward, all computed locally (zero LLM calls):
+## Reward Function (V5)
+
+7 components, all deterministic. No embedding models.
+
+**Tier 1 — Did you solve it? (0.65):**
 
 | Component | Weight | Method |
 |-----------|--------|--------|
-| Service accuracy | 0.25 | Exact match: did you identify the correct root service? |
-| Semantic similarity | 0.45 | Embedding cosine similarity (EmbeddingGemma-300M) between submitted and true root cause |
-| Investigation coverage | 0.15 | Fraction of relevant services investigated before diagnosing |
-| Efficiency | 0.10 | Non-linear: full bonus if ≤70% budget used, penalizes only budget exhaustion |
-| Confidence calibration | 0.05 | Penalizes confident wrong answers, rewards well-calibrated confidence |
+| Service identification | 0.25 | Exact match on root service (+ 0.08 adjacency partial) |
+| Failure type | 0.15 | Exact match from 20-type taxonomy |
+| Causal chain | 0.15 | F1 score vs golden propagation chain |
+| Explanation keywords | 0.10 | Golden keyword checklist (5 terms per scenario) |
 
-Difficulty multiplier: easy=0.6, medium=0.8, hard=1.0, expert=1.2. Total clamped to [0.0, 1.0].
+**Tier 2 — How did you solve it? (0.35):**
+
+| Component | Weight | Method |
+|-----------|--------|--------|
+| Query efficiency | 0.20 | Actual vs per-scenario optimal queries |
+| Investigation waste | 0.08 | Penalizes duplicate queries, tunnel vision |
+| Investigation breadth | 0.07 | Fraction of causal-chain services investigated |
+
+**Anti-gaming:** Components 2-4 are GATED on correct service identification. Wrong service = 0 on Tier 1. No free points.
 
 ## Custom Incident Registry
-
-Bring your own scenarios:
 
 ```bash
 export OPENENV_CUSTOM_REGISTRY=/path/to/my_incidents.jsonl
 ```
 
-Each line is a JSON object following the schema in [`scenarios/schema.md`](scenarios/schema.md). Key fields:
-
-```json
-{
-  "id": "my_scenario_001",
-  "title": "Alert title",
-  "difficulty": "medium",
-  "duration_minutes": 15,
-  "services": {"svc-a": {"upstream": []}, "svc-b": {"upstream": ["svc-a"]}},
-  "failure": {
-    "root_service": "svc-b",
-    "root_cause_type": "connection_pool_exhausted",
-    "root_cause_statement": "svc-b connection pool exhausted due to..."
-  },
-  "log_templates": [...],
-  "metric_templates": {...}
-}
-```
+See [`scenarios/schema.md`](scenarios/schema.md) for the scenario schema and [`scenarios/difficulty_calibration.md`](scenarios/difficulty_calibration.md) for the 4-dimension difficulty framework.
 
 ## Episode Flow
 
@@ -111,18 +94,18 @@ Each line is a JSON object following the schema in [`scenarios/schema.md`](scena
 Agent                              Environment
   │                                     │
   │──── reset(difficulty="hard") ──────>│  Pick scenario, generate logs/metrics
-  │<─── alert message, budget=7 ────────│
+  │<─── alert message ─────────────────│
   │                                     │
   │──── list_services() ───────────────>│  (free)
   │<─── ["api-gw","cache","db",...] ────│
   │                                     │
-  │──── read_logs("api-gw", ERROR) ────>│  budget: 7→6
+  │──── read_logs("api-gw", ERROR) ────>│
   │<─── [{ts, svc, level, msg},...] ────│
   │                                     │
-  │──── check_metric("db","latency") ──>│  budget: 6→5
+  │──── check_metric("db","latency") ──>│
   │<─── [{ts: .., value: 22}, ...] ─────│
   │                                     │
-  │  ... more investigation ...         │
+  │  ... investigate until confident ... │
   │                                     │
   │──── submit_diagnosis(cause,svc) ───>│  Compute reward, end episode
   │<─── reward=0.72, done=True ─────────│
@@ -131,36 +114,32 @@ Agent                              Environment
 ## Run Locally
 
 ```bash
-# Start the server
+git clone https://huggingface.co/spaces/Maverick98/sre-incident-env
+cd sre-incident-env
+uv sync
 uvicorn server.app:app --host 0.0.0.0 --port 8000
+```
 
-# Or use openenv
-openenv serve
+## Run Inference
 
-# Health check
-curl http://localhost:8000/health
+```bash
+# Against HF Space
+python inference.py --space https://Maverick98-sre-incident-env.hf.space --model gpt-4o
+
+# Locally
+python inference.py --model o4-mini --episodes 3 --difficulty hard
 ```
 
 ## Deploy to HuggingFace Spaces
 
 ```bash
-# Build Docker image
-docker build -t sre-incident-env .
-
-# Push via openenv
-openenv push --repo-id <your-org>/sre-incident-env
+openenv push --repo-id your-username/sre-incident-env
 ```
 
-The Dockerfile pre-downloads the EmbeddingGemma-300M model at build time for fast cold starts.
+## Architecture
 
-## Benchmark Results
-
-Tested across frontier models (April 2026):
-
-| Model | Easy | Medium | Hard | Expert | Avg |
-|-------|------|--------|------|--------|-----|
-| o4-mini | 0.24 | 0.57 | 0.12 | 0.58 | 0.38 |
-| gpt-5.4 | 0.38 | 0.51 | 0.10 | 0.02 | 0.25 |
-| gpt-4o | 0.20 | - | - | - | 0.20 |
-
-Key insight: even the best frontier models struggle on hard/expert scenarios, demonstrating significant room for RL training improvement.
+- **Environment server**: MCPEnvironment (FastMCP) with 4 tools
+- **Reward**: Fully deterministic, no model dependencies
+- **Scenarios**: 20 main + 20 extra in JSONL, procedural log/metric generation
+- **Client**: MCPToolClient (async/sync), installable via pip
+- **Inference**: Native OpenAI function calling, smart context summarization
