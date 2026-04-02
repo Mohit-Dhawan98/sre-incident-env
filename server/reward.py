@@ -1,28 +1,26 @@
-"""Reward computation for SRE incident diagnosis — V4 (ungameable + learnable).
+"""Reward computation for SRE incident diagnosis — V5 (signal-quality first).
 
 Design principles:
-  - Every point requires genuine understanding. No free points.
-  - Tier 1 (Diagnosis, 0.70): Components 2-4 GATED on correct service ID.
-  - Tier 2 (Investigation, 0.30): NOT gated — provides RL gradient even on
-    failed episodes. Measures investigation process quality.
-  - Adjacency partial credit on service ID gives RL signal for "close but
-    not quite — trace one more hop upstream."
-  - No difficulty multiplier — harder scenarios are inherently harder.
+  - Weight proportional to signal quality. Clean signals get more weight.
+  - Tier 1 components GATED on correct service ID (wrong service = 0 on Tier 1).
+  - Tier 2 NOT gated — provides RL gradient even on failed episodes.
+  - All signals are deterministic. No embedding models needed.
+  - Explanation uses keyword checklist (golden data), not free-text similarity.
 
 Reward components (7, totaling 1.0):
 
-  Tier 1 — Diagnosis Quality (0.60):
-    1. Root service ID       (0.20): exact match + adjacency partial credit
-    2. Failure type match    (0.10): exact match, GATED on service correct
-    3. Root cause explanation (0.20): embedding sim, GATED on service correct
-    4. Causal chain validity  (0.10): F1 vs golden chain, GATED on service correct
+  Tier 1 — Did you solve it? (0.65):
+    1. Root service ID        (0.25): exact match + adjacency(0.08) partial
+    2. Failure type match     (0.15): exact match from taxonomy, GATED
+    3. Causal chain validity   (0.15): F1 vs golden chain, GATED
+    4. Explanation keywords    (0.10): golden keyword checklist, GATED
 
-  Tier 2 — Investigation Quality (0.40):
-    5. Investigation efficiency (0.15): penalizes waste, NOT gated
-    6. Investigation breadth    (0.10): rewards relevant coverage, NOT gated
-    7. Query efficiency         (0.15): compares actual vs optimal queries, NOT gated
+  Tier 2 — How did you solve it? (0.35):
+    5. Query efficiency        (0.20): actual vs optimal queries, NOT gated
+    6. Waste penalty           (0.08): duplicates/tunnel vision, NOT gated
+    7. Investigation breadth   (0.07): queried causal chain services, NOT gated
 
-Uses all-mpnet-base-v2 for semantic similarity — runs locally, no API calls.
+All deterministic. No model loading. Tests run in <2s.
 """
 
 from typing import Any, Dict, List, Set, Tuple
@@ -133,10 +131,10 @@ def compute_reward(
     true_svc = true_root_service.strip().lower()
 
     if sub_svc == true_svc:
-        service_score = 0.20
+        service_score = 0.25
         service_correct = True
     elif services_graph and sub_svc in _get_neighbors(true_svc, services_graph):
-        service_score = 0.06
+        service_score = 0.08
         service_correct = False  # Adjacent does NOT unlock gated components
     else:
         service_score = 0.0
@@ -151,7 +149,7 @@ def compute_reward(
     else:
         # ── Component 2: Failure Type Classification (0.15) ──────────
         type_score = (
-            0.10
+            0.15
             if (
                 submitted_failure_type.strip().lower()
                 == true_failure_type.strip().lower()
@@ -173,7 +171,7 @@ def compute_reward(
             for keyword in explanation_keywords:
                 if keyword.lower() in submitted_text:
                     found += 1
-            semantic_score = (found / len(explanation_keywords)) * 0.20
+            semantic_score = (found / len(explanation_keywords)) * 0.10
         else:
             # Fallback to simple Jaccard if no checklist defined
             stopwords = {'the', 'and', 'was', 'for', 'that', 'with', 'from',
@@ -185,7 +183,7 @@ def compute_reward(
             true_kw = extract_kw(true_root_cause)
             sub_kw = extract_kw(submitted_text)
             union = len(true_kw | sub_kw)
-            semantic_score = (len(true_kw & sub_kw) / union * 0.20) if union else 0.0
+            semantic_score = (len(true_kw & sub_kw) / union * 0.10) if union else 0.0
 
         # ── Component 4: Causal Chain Validity (0.10) ────────────────
         # Compared against golden causal_chain from scenario.
@@ -209,7 +207,7 @@ def compute_reward(
                 if starts_with_root and precision > 0 and recall > 0:
                     # F1-like score: harmonic mean of precision and recall
                     f1 = 2 * precision * recall / (precision + recall)
-                    chain_score = f1 * 0.10
+                    chain_score = f1 * 0.15
             elif services_graph:
                 # Fallback: validate edges against graph
                 all_lower = {s.lower() for s in all_services}
@@ -229,9 +227,9 @@ def compute_reward(
                         if chain_lower[i + 1] in upstream_of_from:
                             valid_edges += 1
                     if total_edges > 0:
-                        chain_score = (valid_edges / total_edges) * 0.10
+                        chain_score = (valid_edges / total_edges) * 0.15
                     else:
-                        chain_score = 0.10
+                        chain_score = 0.15
 
     # ══════════════════════════════════════════════════════════════════
     # TIER 2: INVESTIGATION QUALITY (0.30) — NOT gated on diagnosis
@@ -278,7 +276,7 @@ def compute_reward(
             prev_service = svc
 
         waste_fraction = wasted / num_investigative if num_investigative > 0 else 0
-        efficiency_score = 0.15 * max(0.0, 1.0 - waste_fraction)
+        efficiency_score = 0.08 * max(0.0, 1.0 - waste_fraction)
 
     # ── Component 6: Investigation Breadth (0.15) ────────────────────
     # Rewards querying services in the causal chain. Penalizes spray-and-pray.
@@ -308,7 +306,7 @@ def compute_reward(
         else:
             spray_penalty = 1.0
 
-        breadth_score = 0.10 * relevance_ratio * spray_penalty
+        breadth_score = 0.07 * relevance_ratio * spray_penalty
     else:
         breadth_score = 0.0
 
@@ -322,14 +320,14 @@ def compute_reward(
     elif optimal_queries > 0:
         ratio = total_queries / optimal_queries
         if ratio <= 1.5:
-            query_efficiency_score = 0.15  # Within sweet spot
+            query_efficiency_score = 0.20  # Within sweet spot
         elif ratio <= 3.0:
             # Linear decay from 1.5x to 3x
-            query_efficiency_score = 0.15 * (1.0 - (ratio - 1.5) / 1.5)
+            query_efficiency_score = 0.20 * (1.0 - (ratio - 1.5) / 1.5)
         else:
             query_efficiency_score = 0.0  # Excessive waste
     else:
-        query_efficiency_score = 0.15
+        query_efficiency_score = 0.20
 
     # ══════════════════════════════════════════════════════════════════
     # TOTAL
