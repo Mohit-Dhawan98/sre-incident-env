@@ -9,17 +9,18 @@ Design principles:
     not quite — trace one more hop upstream."
   - No difficulty multiplier — harder scenarios are inherently harder.
 
-Reward components (6, totaling 1.0):
+Reward components (7, totaling 1.0):
 
-  Tier 1 — Diagnosis Quality:
-    1. Root service ID       (0.25): exact match + adjacency partial credit
-    2. Failure type match    (0.15): exact match, GATED on service correct
+  Tier 1 — Diagnosis Quality (0.60):
+    1. Root service ID       (0.20): exact match + adjacency partial credit
+    2. Failure type match    (0.10): exact match, GATED on service correct
     3. Root cause explanation (0.20): embedding sim, GATED on service correct
-    4. Causal chain validity  (0.10): edge-fraction, GATED on service correct
+    4. Causal chain validity  (0.10): F1 vs golden chain, GATED on service correct
 
-  Tier 2 — Investigation Quality:
+  Tier 2 — Investigation Quality (0.40):
     5. Investigation efficiency (0.15): penalizes waste, NOT gated
-    6. Investigation breadth    (0.15): rewards relevant coverage, NOT gated
+    6. Investigation breadth    (0.10): rewards relevant coverage, NOT gated
+    7. Query efficiency         (0.15): compares actual vs optimal queries, NOT gated
 
 Uses all-mpnet-base-v2 for semantic similarity — runs locally, no API calls.
 """
@@ -112,6 +113,7 @@ def compute_reward(
     services_graph: Dict[str, Any] = None,
     tool_call_history: List[Tuple[str, str]] = (),
     true_causal_chain: List[str] = (),
+    optimal_queries: int = 10,
 ) -> float:
     """Compute ungameable + learnable reward for incident diagnosis.
 
@@ -128,10 +130,10 @@ def compute_reward(
     true_svc = true_root_service.strip().lower()
 
     if sub_svc == true_svc:
-        service_score = 0.25
+        service_score = 0.20
         service_correct = True
     elif services_graph and sub_svc in _get_neighbors(true_svc, services_graph):
-        service_score = 0.08
+        service_score = 0.06
         service_correct = False  # Adjacent does NOT unlock gated components
     else:
         service_score = 0.0
@@ -146,7 +148,7 @@ def compute_reward(
     else:
         # ── Component 2: Failure Type Classification (0.15) ──────────
         type_score = (
-            0.15
+            0.10
             if (
                 submitted_failure_type.strip().lower()
                 == true_failure_type.strip().lower()
@@ -301,9 +303,28 @@ def compute_reward(
         else:
             spray_penalty = 1.0
 
-        breadth_score = 0.15 * relevance_ratio * spray_penalty
+        breadth_score = 0.10 * relevance_ratio * spray_penalty
     else:
         breadth_score = 0.0
+
+    # ── Component 7: Query Efficiency (0.15) ───────────────────────
+    # Compares actual queries used vs optimal (golden data per scenario).
+    # Full credit at <= 1.5x optimal. Linear decay to 3x. Zero beyond.
+    # Also zero if < 3 queries (rushed/guessed).
+    total_queries = len([t for t in tool_call_history if t[0] in ("read_logs", "check_metric")])
+    if total_queries < 3:
+        query_efficiency_score = 0.0  # Rushed — didn't investigate
+    elif optimal_queries > 0:
+        ratio = total_queries / optimal_queries
+        if ratio <= 1.5:
+            query_efficiency_score = 0.15  # Within sweet spot
+        elif ratio <= 3.0:
+            # Linear decay from 1.5x to 3x
+            query_efficiency_score = 0.15 * (1.0 - (ratio - 1.5) / 1.5)
+        else:
+            query_efficiency_score = 0.0  # Excessive waste
+    else:
+        query_efficiency_score = 0.15
 
     # ══════════════════════════════════════════════════════════════════
     # TOTAL
@@ -316,6 +337,7 @@ def compute_reward(
         + chain_score
         + efficiency_score
         + breadth_score
+        + query_efficiency_score
     )
 
     return round(min(1.0, max(0.0, total)), 4)

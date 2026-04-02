@@ -209,6 +209,7 @@ class SREIncidentEnvironment(MCPEnvironment):
                 services_graph=self._scenario["services"],
                 tool_call_history=self._tool_call_history,
                 true_causal_chain=self._scenario["failure"].get("causal_chain", []),
+                optimal_queries=self._scenario["failure"].get("optimal_queries", 10),
             )
 
             self._done = True
@@ -241,7 +242,10 @@ class SREIncidentEnvironment(MCPEnvironment):
     def _budget_for_difficulty(difficulty: str) -> int:
         # Harder incidents get MORE budget — like a real P0 gets all hands.
         # Difficulty comes from scenario content complexity, not resource starvation.
-        return {"easy": 20, "medium": 25, "hard": 30, "expert": 40}.get(difficulty, 25)
+        # Budget is effectively unlimited — difficulty is purely in scenario content.
+        # 100 queries is a safety cutoff (prevent infinite loops), not a constraint.
+        # No model should need 100 queries for a 5-10 service topology.
+        return 100
 
     def reset(
         self,
