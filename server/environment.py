@@ -44,6 +44,7 @@ class SREIncidentEnvironment(MCPEnvironment):
         self._diagnosis_submitted: bool = False
         self._current_reward: float = 0.0
         self._services_queried: set = set()
+        self._tool_call_history: list = []  # [(tool_name, service_arg)]
         self._state = State(episode_id=str(uuid4()), step_count=0)
 
     def _register_tools(self, mcp: FastMCP) -> None:
@@ -91,6 +92,7 @@ class SREIncidentEnvironment(MCPEnvironment):
                 return json.dumps({"error": "Episode is over."})
 
             self._services_queried.add(service)
+            self._tool_call_history.append(("read_logs", service))
 
             budget_result = self._use_query()
             if budget_result:
@@ -130,6 +132,7 @@ class SREIncidentEnvironment(MCPEnvironment):
                 return json.dumps({"error": "Episode is over."})
 
             self._services_queried.add(service)
+            self._tool_call_history.append(("check_metric", service))
 
             budget_result = self._use_query()
             if budget_result:
@@ -200,6 +203,7 @@ class SREIncidentEnvironment(MCPEnvironment):
                 true_failure_type=failure["root_cause_type"],
                 submitted_chain=chain_list,
                 services_graph=self._scenario["services"],
+                tool_call_history=self._tool_call_history,
             )
 
             self._done = True
@@ -255,6 +259,7 @@ class SREIncidentEnvironment(MCPEnvironment):
         self._diagnosis_submitted = False
         self._current_reward = 0.0
         self._services_queried = set()
+        self._tool_call_history = []
         self._state = State(
             episode_id=episode_id or str(uuid4()), step_count=0
         )

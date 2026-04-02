@@ -1,27 +1,30 @@
-"""Reward computation for SRE incident diagnosis — V3 (ungameable).
+"""Reward computation for SRE incident diagnosis — V4 (ungameable + learnable).
 
 Design principles:
   - Every point requires genuine understanding. No free points.
-  - Components 2-4 are GATED on correct service identification.
-    An agent that identifies the wrong service scores 0.0 (except the
-    ~1/N random chance of guessing the service correctly).
-  - No coverage, efficiency, or calibration components. The query budget
-    is a constraint (enforced by the environment), not a reward signal.
-  - Semantic similarity uses a high threshold (0.60) with a power curve
-    to prevent vague descriptions from scoring partial credit.
+  - Tier 1 (Diagnosis, 0.70): Components 2-4 GATED on correct service ID.
+  - Tier 2 (Investigation, 0.30): NOT gated — provides RL gradient even on
+    failed episodes. Measures investigation process quality.
+  - Adjacency partial credit on service ID gives RL signal for "close but
+    not quite — trace one more hop upstream."
+  - No difficulty multiplier — harder scenarios are inherently harder.
 
-Reward components (4, totaling 1.0):
-    1. Service identification  (0.30): exact match on root service
-    2. Failure type match      (0.20): exact match, GATED on #1
-    3. Root cause explanation   (0.35): embedding similarity, GATED on #1
-    4. Causal chain validity    (0.15): graph-validated chain, GATED on #1
+Reward components (6, totaling 1.0):
 
-Total max reward: 1.0, all scores clamped to [0.0, 1.0].
-Zero LLM calls — only local embedding model for semantic similarity.
-Deterministic given same inputs (embedding model is deterministic).
+  Tier 1 — Diagnosis Quality:
+    1. Root service ID       (0.25): exact match + adjacency partial credit
+    2. Failure type match    (0.15): exact match, GATED on service correct
+    3. Root cause explanation (0.20): embedding sim, GATED on service correct
+    4. Causal chain validity  (0.10): edge-fraction, GATED on service correct
+
+  Tier 2 — Investigation Quality:
+    5. Investigation efficiency (0.15): penalizes waste, NOT gated
+    6. Investigation breadth    (0.15): rewards relevant coverage, NOT gated
+
+Uses all-mpnet-base-v2 for semantic similarity — runs locally, no API calls.
 """
 
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, List, Set, Tuple
 
 from sentence_transformers import SentenceTransformer, util
 
@@ -33,6 +36,63 @@ def _get_model() -> SentenceTransformer:
     if _model is None:
         _model = SentenceTransformer("sentence-transformers/all-mpnet-base-v2")
     return _model
+
+
+def _get_neighbors(service: str, services_graph: Dict[str, Any]) -> Set[str]:
+    """Get services one hop away in the dependency graph."""
+    if not services_graph:
+        return set()
+    svc_lower = service.strip().lower()
+    graph_lower = {}
+    for name, info in services_graph.items():
+        graph_lower[name.lower()] = [u.lower() for u in info.get("upstream", [])]
+
+    neighbors = set()
+    for name, upstreams in graph_lower.items():
+        if name == svc_lower:
+            # Services that call this one (upstreams)
+            neighbors.update(upstreams)
+        if svc_lower in upstreams:
+            # Services this one calls (downstreams)
+            neighbors.add(name)
+    return neighbors
+
+
+def _get_causal_chain_services(
+    root_service: str, services_graph: Dict[str, Any]
+) -> Set[str]:
+    """Derive services in the failure propagation path via BFS from root.
+
+    Failure propagates from root → services that depend on root (call root)
+    → services that depend on those, etc.
+    """
+    if not services_graph:
+        return {root_service.lower()}
+
+    graph_lower = {}
+    for name, info in services_graph.items():
+        graph_lower[name.lower()] = [u.lower() for u in info.get("upstream", [])]
+
+    # Build reverse graph: who depends on whom
+    dependents = {}  # service → list of services that call it
+    for name, upstreams in graph_lower.items():
+        for u in upstreams:
+            dependents.setdefault(u, []).append(name)
+
+    # BFS from root through dependents
+    root_lower = root_service.strip().lower()
+    visited = set()
+    queue = [root_lower]
+    while queue:
+        svc = queue.pop(0)
+        if svc in visited:
+            continue
+        visited.add(svc)
+        for dep in dependents.get(svc, []):
+            if dep not in visited:
+                queue.append(dep)
+
+    return visited
 
 
 def compute_reward(
@@ -50,130 +110,190 @@ def compute_reward(
     true_failure_type: str = "",
     submitted_chain: List[str] = (),
     services_graph: Dict[str, Any] = None,
+    tool_call_history: List[Tuple[str, str]] = (),
 ) -> float:
-    """Compute ungameable reward for incident diagnosis.
+    """Compute ungameable + learnable reward for incident diagnosis.
 
-    Args:
-        submitted_root_cause: Agent's free-text root cause explanation.
-        submitted_service: Agent's identified root cause service.
-        true_root_cause: Ground truth root cause statement.
-        true_root_service: Ground truth root cause service name.
-        steps_used: Number of queries the agent used.
-        query_budget: Maximum queries allowed.
-        difficulty: Scenario difficulty level.
-        confidence: Agent's self-reported confidence (unused in V3).
-        services_queried: Set of service names the agent queried.
-        all_services: Set of all service names in the scenario.
-        submitted_failure_type: Agent's failure type classification.
-        true_failure_type: Ground truth failure type.
-        submitted_chain: Agent's causal chain (ordered list of services).
-        services_graph: Dict of service_name -> {upstream: [list]} from scenario.
-            Used to validate causal chain edges against real dependencies.
-
-    Returns:
-        Float reward in [0.0, 1.0].
+    Returns float in [0.0, 1.0].
     """
 
-    # ── Component 1: Service Identification (0.30) ──────────────────────
-    # Binary exact match. Cannot be gamed. Random guessing yields ~0.05.
-    service_correct = (
-        submitted_service.strip().lower() == true_root_service.strip().lower()
-    )
-    service_score = 0.30 if service_correct else 0.0
+    # ══════════════════════════════════════════════════════════════════
+    # TIER 1: DIAGNOSIS QUALITY (0.70)
+    # ══════════════════════════════════════════════════════════════════
 
-    # ── GATE: All remaining components require correct service ID ────────
-    if not service_correct:
-        return round(service_score, 4)  # 0.0 in practice
+    # ── Component 1: Root Service Identification (0.25) ──────────────
+    # Exact match = 0.25. One-hop adjacent = 0.08. Else 0.0.
+    sub_svc = submitted_service.strip().lower()
+    true_svc = true_root_service.strip().lower()
 
-    # ── Component 2: Failure Type Classification (0.20) ─────────────────
-    # Binary exact match, gated on service. Random guessing on type alone
-    # yields 0.20/20 = 0.01, but since it's gated on service (0.05 random),
-    # combined random expected value is ~0.0005. Effectively zero.
-    type_score = (
-        0.20
-        if (
-            submitted_failure_type.strip().lower()
-            == true_failure_type.strip().lower()
-            and submitted_failure_type.strip()
-        )
-        else 0.0
-    )
-
-    # ── Component 3: Root Cause Explanation (0.35) ──────────────────────
-    # Embedding cosine similarity with:
-    #   - High threshold (0.60) to reject vague descriptions
-    #   - Power curve (exponent 1.5) to disproportionately reward precision
-    #   - Length penalty to prevent kitchen-sink descriptions
-    submitted_text = submitted_root_cause.strip()
-    if not submitted_text:
-        semantic_score = 0.0
+    if sub_svc == true_svc:
+        service_score = 0.25
+        service_correct = True
+    elif services_graph and sub_svc in _get_neighbors(true_svc, services_graph):
+        service_score = 0.08
+        service_correct = False  # Adjacent does NOT unlock gated components
     else:
-        model = _get_model()
-        emb_submitted = model.encode(submitted_text, convert_to_tensor=True)
-        emb_true = model.encode(true_root_cause, convert_to_tensor=True)
-        sim = float(util.cos_sim(emb_submitted, emb_true).item())
+        service_score = 0.0
+        service_correct = False
 
-        # Map [0.60, 1.0] -> [0, 1] with power curve
-        raw = max(0.0, (sim - 0.60) / 0.40)
-        curved = raw ** 1.5
+    # ── GATE: Components 2-4 require EXACT service match ─────────────
+    if not service_correct:
+        # Skip to Tier 2 (investigation quality — not gated)
+        type_score = 0.0
+        semantic_score = 0.0
+        chain_score = 0.0
+    else:
+        # ── Component 2: Failure Type Classification (0.15) ──────────
+        type_score = (
+            0.15
+            if (
+                submitted_failure_type.strip().lower()
+                == true_failure_type.strip().lower()
+                and submitted_failure_type.strip()
+            )
+            else 0.0
+        )
 
-        # Length penalty: too short = no explanation, too long = kitchen sink
-        text_len = len(submitted_text)
-        if text_len < 20:
-            length_factor = 0.0
-        elif text_len > 500:
-            # Graceful degradation, floor at 0.3
-            length_factor = max(0.3, 500.0 / text_len)
+        # ── Component 3: Root Cause Explanation (0.20) ───────────────
+        submitted_text = submitted_root_cause.strip()
+        if not submitted_text:
+            semantic_score = 0.0
         else:
-            length_factor = 1.0
+            model = _get_model()
+            emb_sub = model.encode(submitted_text, convert_to_tensor=True)
+            emb_true = model.encode(true_root_cause, convert_to_tensor=True)
+            sim = float(util.cos_sim(emb_sub, emb_true).item())
 
-        semantic_score = curved * length_factor * 0.35
+            # Map [0.60, 1.0] → [0, 1] with power curve
+            raw = max(0.0, (sim - 0.60) / 0.40)
+            curved = raw ** 1.5
 
-    # ── Component 4: Causal Chain Validity (0.15) ───────────────────────
-    # All-or-nothing: chain must start with root service, every consecutive
-    # pair must be a real dependency edge, and no duplicates.
-    # If services_graph is unavailable, fall back to basic validation.
-    chain_score = 0.0
-    if submitted_chain and len(submitted_chain) >= 2:
-        chain_lower = [s.strip().lower() for s in submitted_chain]
-        all_lower = {s.lower() for s in all_services}
-
-        starts_with_root = chain_lower[0] == true_root_service.strip().lower()
-        all_real = all(s in all_lower for s in chain_lower)
-        no_dupes = len(chain_lower) == len(set(chain_lower))
-
-        if starts_with_root and all_real and no_dupes:
-            if services_graph:
-                # Validate each edge against the dependency graph.
-                # chain[i] -> chain[i+1] means chain[i+1] calls chain[i],
-                # so chain[i] should appear in chain[i+1]'s upstream list.
-                # Build case-insensitive lookup.
-                graph_lower = {}
-                for svc_name, svc_info in services_graph.items():
-                    upstream = svc_info.get("upstream", [])
-                    graph_lower[svc_name.lower()] = [
-                        u.lower() for u in upstream
-                    ]
-
-                total_edges = len(chain_lower) - 1
-                valid_edges = 0
-                for i in range(total_edges):
-                    svc_from = chain_lower[i]
-                    svc_to = chain_lower[i + 1]
-                    # svc_to's upstream should contain svc_from
-                    # (meaning svc_to depends on svc_from)
-                    upstream_of_to = graph_lower.get(svc_to, [])
-                    if svc_from in upstream_of_to:
-                        valid_edges += 1
-
-                # All-or-nothing: every edge must be valid
-                if valid_edges == total_edges:
-                    chain_score = 0.15
+            # Length penalty: too short = no explanation, too long = kitchen sink
+            text_len = len(submitted_text)
+            if text_len < 20:
+                length_factor = 0.0
+            elif text_len > 500:
+                length_factor = max(0.3, 500.0 / text_len)
             else:
-                # No graph available — fall back to basic validation only.
-                # This is weaker but still requires root + real + no dupes.
-                chain_score = 0.15
+                length_factor = 1.0
 
-    # ── Total ───────────────────────────────────────────────────────────
-    total = service_score + type_score + semantic_score + chain_score
+            semantic_score = curved * length_factor * 0.20
+
+        # ── Component 4: Causal Chain Validity (0.10) ────────────────
+        # Edge-fraction: score = valid_edges / total_edges
+        chain_score = 0.0
+        if submitted_chain and len(submitted_chain) >= 2:
+            chain_lower = [s.strip().lower() for s in submitted_chain]
+            all_lower = {s.lower() for s in all_services}
+
+            starts_with_root = chain_lower[0] == true_svc
+            all_real = all(s in all_lower for s in chain_lower)
+            no_dupes = len(chain_lower) == len(set(chain_lower))
+
+            if starts_with_root and all_real and no_dupes:
+                if services_graph:
+                    graph_lower = {}
+                    for svc_name, svc_info in services_graph.items():
+                        graph_lower[svc_name.lower()] = [
+                            u.lower() for u in svc_info.get("upstream", [])
+                        ]
+                    total_edges = len(chain_lower) - 1
+                    valid_edges = 0
+                    for i in range(total_edges):
+                        svc_from = chain_lower[i]
+                        svc_to = chain_lower[i + 1]
+                        # svc_to depends on svc_from
+                        if svc_from in graph_lower.get(svc_to, []):
+                            valid_edges += 1
+                    chain_score = (valid_edges / total_edges) * 0.10 if total_edges > 0 else 0.0
+                else:
+                    # No graph — basic validation only
+                    chain_score = 0.10
+
+    # ══════════════════════════════════════════════════════════════════
+    # TIER 2: INVESTIGATION QUALITY (0.30) — NOT gated on diagnosis
+    # ══════════════════════════════════════════════════════════════════
+
+    # ── Component 5: Investigation Efficiency (0.15) ─────────────────
+    # Penalizes: duplicate queries, nonexistent service queries, tunnel vision.
+    # Requires minimum 2 investigative queries (prevents "guess immediately").
+    investigative_calls = [
+        (t, a) for t, a in tool_call_history
+        if t in ("read_logs", "check_metric")
+    ]
+    num_investigative = len(investigative_calls)
+
+    if num_investigative < 2:
+        # Rushed — didn't investigate, just guessed
+        efficiency_score = 0.0
+    else:
+        wasted = 0
+        seen_calls = set()
+        consecutive_same_service = 0
+        prev_service = None
+
+        for tool_name, service_arg in investigative_calls:
+            call_key = (tool_name, service_arg.lower() if service_arg else "")
+
+            # Duplicate detection
+            if call_key in seen_calls:
+                wasted += 1
+            seen_calls.add(call_key)
+
+            # Nonexistent service detection
+            if service_arg and service_arg.lower() not in {s.lower() for s in all_services}:
+                wasted += 1
+
+            # Tunnel vision: 3+ consecutive queries to same service
+            svc = (service_arg or "").lower()
+            if svc == prev_service:
+                consecutive_same_service += 1
+                if consecutive_same_service >= 2:  # 3rd+ consecutive
+                    wasted += 1
+            else:
+                consecutive_same_service = 0
+            prev_service = svc
+
+        waste_fraction = wasted / num_investigative if num_investigative > 0 else 0
+        efficiency_score = 0.15 * max(0.0, 1.0 - waste_fraction)
+
+    # ── Component 6: Investigation Breadth (0.15) ────────────────────
+    # Rewards querying services in the causal chain. Penalizes spray-and-pray.
+    if services_graph and services_queried:
+        causal_services = _get_causal_chain_services(true_root_service, services_graph)
+        queried_lower = {s.lower() for s in services_queried}
+
+        # How many causal-chain services did you investigate?
+        relevant_queried = len(queried_lower & causal_services)
+        total_causal = len(causal_services)
+
+        if total_causal > 0:
+            relevance_ratio = min(1.0, relevant_queried / total_causal)
+        else:
+            relevance_ratio = 0.0
+
+        # Penalize spray-and-pray: querying >2x the causal chain services
+        over_query_ratio = len(queried_lower) / max(1, total_causal)
+        if over_query_ratio > 2.0:
+            spray_penalty = max(0.5, 2.0 / over_query_ratio)
+        else:
+            spray_penalty = 1.0
+
+        breadth_score = 0.15 * relevance_ratio * spray_penalty
+    else:
+        breadth_score = 0.0
+
+    # ══════════════════════════════════════════════════════════════════
+    # TOTAL
+    # ══════════════════════════════════════════════════════════════════
+
+    total = (
+        service_score
+        + type_score
+        + semantic_score
+        + chain_score
+        + efficiency_score
+        + breadth_score
+    )
+
     return round(min(1.0, max(0.0, total)), 4)

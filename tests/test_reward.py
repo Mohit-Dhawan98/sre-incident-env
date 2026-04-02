@@ -1,220 +1,237 @@
-"""Test reward function edge cases and range compliance.
+"""Test V4 reward function — ungameable + learnable.
 
-V3 reward function: 4 components, all gated on correct service identification.
-No coverage, efficiency, or calibration components.
+6 components:
+  Tier 1 (Diagnosis, 0.70): service ID, failure type, explanation, causal chain
+  Tier 2 (Investigation, 0.30): efficiency, breadth
 """
 
 import pytest
 from server.reward import compute_reward
 
 
-def test_reward_range_perfect():
-    r = compute_reward(
-        "connection pool exhausted due to leak", "db-primary",
-        "connection pool exhausted due to leak", "db-primary",
-        3, 10, "medium", confidence=0.9,
-        services_queried={"db-primary", "api-gw", "payment"},
-        all_services={"db-primary", "api-gw", "payment", "auth"},
-        submitted_failure_type="connection_pool",
-        true_failure_type="connection_pool",
-        submitted_chain=["db-primary", "payment", "api-gw"],
-    )
-    assert 0.0 <= r <= 1.0
+GRAPH = {
+    "root-db": {"upstream": []},
+    "mid-svc": {"upstream": ["root-db"]},
+    "api-gw": {"upstream": ["mid-svc"]},
+    "unrelated": {"upstream": ["api-gw"]},
+}
+
+BASE = dict(
+    submitted_root_cause="root-db connection pool exhausted due to config drift",
+    submitted_service="root-db",
+    true_root_cause="root-db connection pool exhausted due to config drift in v2.3",
+    true_root_service="root-db",
+    steps_used=5, query_budget=10, difficulty="medium",
+    all_services={"root-db", "mid-svc", "api-gw", "unrelated"},
+    services_graph=GRAPH,
+)
 
 
-def test_reward_range_wrong():
-    r = compute_reward(
-        "high CPU usage", "web-server",
-        "connection pool exhausted", "db-primary",
-        10, 10, "medium",
-    )
-    assert 0.0 <= r <= 1.0
+# ─── Component 1: Service ID ───────────────────────────────────────
+
+def test_service_exact_match():
+    r = compute_reward(**{**BASE})
+    assert r >= 0.25  # at least service score
 
 
-def test_reward_range_empty():
-    r = compute_reward("", "", "pool exhausted", "db", 0, 10, "medium")
-    assert 0.0 <= r <= 1.0
+def test_service_adjacent_partial():
+    """One-hop neighbor gets 0.08, not 0.0."""
+    r = compute_reward(**{**BASE, "submitted_service": "mid-svc"})
+    assert 0.05 < r < 0.25  # adjacency bonus + investigation scores
 
 
-def test_reward_service_match_contributes():
-    r_match = compute_reward("something", "db", "something else", "db", 5, 10, "medium")
-    r_nomatch = compute_reward("something", "web", "something else", "db", 5, 10, "medium")
-    assert r_match > r_nomatch
+def test_service_wrong_scores_near_zero():
+    """Wrong non-adjacent service: only investigation tier contributes."""
+    r = compute_reward(**{**BASE, "submitted_service": "unrelated"})
+    assert r < 0.20  # no diagnosis credit, only investigation
 
 
-def test_reward_wrong_service_scores_zero():
-    """Wrong service identification must score exactly 0.0."""
-    r = compute_reward(
-        "connection pool exhausted due to leak", "wrong-service",
-        "connection pool exhausted due to leak", "db-primary",
-        3, 10, "medium",
-        submitted_failure_type="connection_pool",
-        true_failure_type="connection_pool",
-        submitted_chain=["wrong-service", "api-gw"],
-        all_services={"db-primary", "api-gw", "wrong-service"},
-    )
-    assert r == 0.0
+def test_service_wrong_gates_everything():
+    """Wrong service → type/explanation/chain all zero."""
+    r_wrong = compute_reward(**{
+        **BASE, "submitted_service": "wrong",
+        "submitted_failure_type": "config_drift",
+        "true_failure_type": "config_drift",
+        "submitted_chain": ["wrong", "mid-svc"],
+    })
+    r_right = compute_reward(**{
+        **BASE,
+        "submitted_failure_type": "config_drift",
+        "true_failure_type": "config_drift",
+        "submitted_chain": ["root-db", "mid-svc"],
+    })
+    assert r_right > r_wrong + 0.30  # at least 0.30 more
 
 
-def test_reward_failure_type_match():
-    r_match = compute_reward(
-        "cause text here is long enough", "svc",
-        "cause text here is long enough", "svc", 5, 10, "medium",
-        submitted_failure_type="oom_kill", true_failure_type="oom_kill",
-    )
-    r_nomatch = compute_reward(
-        "cause text here is long enough", "svc",
-        "cause text here is long enough", "svc", 5, 10, "medium",
-        submitted_failure_type="config_drift", true_failure_type="oom_kill",
-    )
-    assert r_match > r_nomatch
+# ─── Component 2: Failure Type ──────────────────────────────────────
+
+def test_failure_type_match():
+    r_match = compute_reward(**{**BASE,
+        "submitted_failure_type": "config_drift", "true_failure_type": "config_drift"})
+    r_no = compute_reward(**{**BASE,
+        "submitted_failure_type": "oom_kill", "true_failure_type": "config_drift"})
+    assert r_match > r_no
 
 
-def test_reward_failure_type_gated_on_service():
-    """Failure type should not contribute if service is wrong."""
-    r = compute_reward(
-        "cause text", "wrong-svc",
-        "cause text", "real-svc", 5, 10, "medium",
-        submitted_failure_type="oom_kill", true_failure_type="oom_kill",
-    )
-    assert r == 0.0
+def test_failure_type_gated_on_service():
+    r = compute_reward(**{**BASE, "submitted_service": "wrong",
+        "submitted_failure_type": "config_drift", "true_failure_type": "config_drift"})
+    # Should not get type credit
+    r2 = compute_reward(**{**BASE, "submitted_service": "wrong"})
+    assert r == r2  # no difference — type is gated
 
 
-def test_reward_causal_chain():
-    r_chain = compute_reward(
-        "cause text here is long enough", "svc",
-        "cause text here is long enough", "svc", 5, 10, "medium",
-        submitted_chain=["svc", "api-gw", "web"],
-        all_services={"svc", "api-gw", "web", "db"},
-        true_failure_type="oom_kill", submitted_failure_type="oom_kill",
-    )
-    r_no_chain = compute_reward(
-        "cause text here is long enough", "svc",
-        "cause text here is long enough", "svc", 5, 10, "medium",
-        true_failure_type="oom_kill", submitted_failure_type="oom_kill",
-    )
-    assert r_chain > r_no_chain
+# ─── Component 3: Explanation ────────────────────────────────────────
+
+def test_explanation_gradient():
+    r_good = compute_reward(**{**BASE,
+        "submitted_root_cause": "root-db connection pool exhausted due to config drift in deployment v2.3"})
+    r_bad = compute_reward(**{**BASE,
+        "submitted_root_cause": "something completely different and wrong explanation"})
+    assert r_good > r_bad
 
 
-def test_reward_causal_chain_gated_on_service():
-    """Causal chain should not contribute if service is wrong."""
-    r = compute_reward(
-        "cause text", "wrong-svc",
-        "cause text", "real-svc", 5, 10, "medium",
-        submitted_chain=["wrong-svc", "api-gw"],
-        all_services={"wrong-svc", "api-gw", "real-svc"},
-    )
-    assert r == 0.0
-
-
-def test_reward_causal_chain_graph_validation():
-    """Chain edges must match real dependency graph when provided."""
-    graph = {
-        "root-db": {"upstream": []},
-        "mid-svc": {"upstream": ["root-db"]},
-        "api-gw": {"upstream": ["mid-svc"]},
-    }
-    # Valid chain: root-db -> mid-svc -> api-gw
-    r_valid = compute_reward(
-        "cause text here is long enough", "root-db",
-        "cause text here is long enough", "root-db", 5, 10, "medium",
-        submitted_chain=["root-db", "mid-svc", "api-gw"],
-        all_services={"root-db", "mid-svc", "api-gw"},
-        services_graph=graph,
-    )
-    # Invalid chain: root-db -> api-gw (skips mid-svc, no direct edge)
-    r_invalid = compute_reward(
-        "cause text here is long enough", "root-db",
-        "cause text here is long enough", "root-db", 5, 10, "medium",
-        submitted_chain=["root-db", "api-gw"],
-        all_services={"root-db", "mid-svc", "api-gw"},
-        services_graph=graph,
-    )
-    assert r_valid > r_invalid
-
-
-def test_reward_no_difficulty_multiplier():
-    """Difficulty does not affect reward -- harder scenarios are inherently harder."""
-    kwargs = dict(
-        submitted_root_cause="pool exhausted due to connection leak",
-        submitted_service="db",
-        true_root_cause="pool exhausted due to connection leak",
-        true_root_service="db",
-        steps_used=3, query_budget=10,
-    )
-    r_easy = compute_reward(**kwargs, difficulty="easy")
-    r_hard = compute_reward(**kwargs, difficulty="hard")
-    assert r_easy == r_hard
-
-
-def test_reward_never_exceeds_one():
-    r = compute_reward(
-        "exact same statement with enough length", "exact-service",
-        "exact same statement with enough length", "exact-service",
-        0, 15, "expert", confidence=1.0,
-        services_queried={"a", "b", "c"}, all_services={"a", "b", "c"},
-        submitted_failure_type="oom_kill", true_failure_type="oom_kill",
-        submitted_chain=["exact-service", "a", "b"],
-    )
-    assert r <= 1.0
-
-
-def test_reward_zero_budget():
-    r = compute_reward(
-        "cause text", "svc", "cause text", "svc", 0, 0, "medium"
-    )
-    assert 0.0 <= r <= 1.0
-
-
-def test_reward_semantic_gated_on_service():
-    """Semantic similarity should not contribute if service is wrong."""
-    r = compute_reward(
-        "connection pool exhausted due to leak", "wrong-svc",
-        "connection pool exhausted due to leak", "correct-svc",
-        3, 10, "medium",
-    )
-    assert r == 0.0
-
-
-def test_reward_length_penalty_short():
-    """Very short explanations should score less than proper ones."""
-    r_short = compute_reward(
-        "oom", "svc", "worker pool OOM killed due to memory leak", "svc",
-        5, 10, "medium",
-    )
-    r_proper = compute_reward(
-        "worker pool OOM killed due to memory leak causing restarts", "svc",
-        "worker pool OOM killed due to memory leak", "svc",
-        5, 10, "medium",
-    )
-    # Short (3 chars) gets length_factor=0, so semantic_score=0
-    # Proper length gets nonzero semantic_score
+def test_explanation_length_penalty():
+    r_short = compute_reward(**{**BASE, "submitted_root_cause": "oom"})
+    r_proper = compute_reward(**{**BASE})
     assert r_proper > r_short
 
 
-def test_reward_gradient_exists():
-    """Reward must provide gradient: correct service < +type < +explanation."""
-    # Service only
-    r1 = compute_reward(
-        "totally wrong explanation", "db",
-        "connection pool exhausted due to leak in db", "db",
-        5, 10, "medium",
-        submitted_failure_type="wrong_type", true_failure_type="connection_pool",
-    )
-    # Service + type
-    r2 = compute_reward(
-        "totally wrong explanation", "db",
-        "connection pool exhausted due to leak in db", "db",
-        5, 10, "medium",
-        submitted_failure_type="connection_pool", true_failure_type="connection_pool",
-    )
-    # Service + type + good explanation
-    r3 = compute_reward(
-        "connection pool in db service exhausted due to a connection leak", "db",
-        "connection pool exhausted due to leak in db", "db",
-        5, 10, "medium",
-        submitted_failure_type="connection_pool", true_failure_type="connection_pool",
-    )
-    assert r1 < r2 <= r3
-    assert r1 == 0.30  # service match only
-    assert r2 == 0.50  # service + type match
+def test_explanation_gated_on_service():
+    r = compute_reward(**{**BASE, "submitted_service": "wrong"})
+    # Even perfect explanation, wrong service → no explanation credit
+    assert r < 0.15
+
+
+# ─── Component 4: Causal Chain ───────────────────────────────────────
+
+def test_chain_valid_edges():
+    r = compute_reward(**{**BASE,
+        "submitted_chain": ["root-db", "mid-svc", "api-gw"]})
+    r_no = compute_reward(**{**BASE})
+    assert r > r_no
+
+
+def test_chain_partial_edges():
+    """Edge-fraction: 1/2 valid edges should score less than 2/2."""
+    r_full = compute_reward(**{**BASE,
+        "submitted_chain": ["root-db", "mid-svc", "api-gw"]})  # 2/2 valid
+    r_partial = compute_reward(**{**BASE,
+        "submitted_chain": ["root-db", "api-gw"]})  # 0/1 valid (skips mid)
+    assert r_full > r_partial
+
+
+def test_chain_random_services_score_zero():
+    """Random chain not starting with root → 0."""
+    r = compute_reward(**{**BASE,
+        "submitted_chain": ["mid-svc", "api-gw", "unrelated"]})
+    r_no = compute_reward(**{**BASE})
+    assert r == r_no  # no chain credit
+
+
+# ─── Component 5: Investigation Efficiency ───────────────────────────
+
+def test_efficiency_no_waste():
+    r = compute_reward(**{**BASE,
+        "tool_call_history": [
+            ("read_logs", "root-db"), ("check_metric", "root-db"),
+            ("read_logs", "mid-svc"), ("check_metric", "mid-svc"),
+        ]})
+    r_no_hist = compute_reward(**{**BASE, "tool_call_history": []})
+    assert r > r_no_hist
+
+
+def test_efficiency_penalizes_duplicates():
+    r_clean = compute_reward(**{**BASE,
+        "tool_call_history": [
+            ("read_logs", "root-db"), ("check_metric", "root-db"),
+            ("read_logs", "mid-svc"),
+        ]})
+    r_dupes = compute_reward(**{**BASE,
+        "tool_call_history": [
+            ("read_logs", "root-db"), ("read_logs", "root-db"),
+            ("read_logs", "root-db"),
+        ]})
+    assert r_clean > r_dupes
+
+
+def test_efficiency_requires_min_investigation():
+    """Submitting after 0-1 queries = rushed = 0 efficiency."""
+    r = compute_reward(**{**BASE,
+        "tool_call_history": [("read_logs", "root-db")]})
+    r2 = compute_reward(**{**BASE, "tool_call_history": []})
+    assert r == r2  # both get 0 efficiency (< 2 calls)
+
+
+def test_efficiency_not_gated_on_service():
+    """Efficiency rewards process even with wrong diagnosis."""
+    r = compute_reward(**{**BASE, "submitted_service": "wrong",
+        "tool_call_history": [
+            ("read_logs", "root-db"), ("check_metric", "root-db"),
+            ("read_logs", "mid-svc"),
+        ]})
+    assert r > 0.0  # gets efficiency + breadth even with wrong service
+
+
+# ─── Component 6: Investigation Breadth ──────────────────────────────
+
+def test_breadth_rewards_relevant():
+    r_relevant = compute_reward(**{**BASE,
+        "services_queried": {"root-db", "mid-svc", "api-gw"},
+        "tool_call_history": [("read_logs", "root-db"), ("read_logs", "mid-svc"), ("read_logs", "api-gw")]})
+    r_irrelevant = compute_reward(**{**BASE,
+        "services_queried": {"unrelated"},
+        "tool_call_history": [("read_logs", "unrelated"), ("read_logs", "unrelated")]})
+    assert r_relevant > r_irrelevant
+
+
+def test_breadth_focused_beats_unfocused():
+    """Querying relevant services scores better than querying irrelevant ones."""
+    history = [("read_logs", "root-db"), ("check_metric", "root-db"),
+               ("read_logs", "mid-svc"), ("check_metric", "mid-svc")]
+    # Focused: queried causal chain services
+    r_focused = compute_reward(**{**BASE,
+        "services_queried": {"root-db", "mid-svc"},
+        "tool_call_history": history})
+    # Unfocused: queried only irrelevant services
+    history_bad = [("read_logs", "unrelated"), ("check_metric", "unrelated"),
+                   ("read_logs", "unrelated"), ("check_metric", "unrelated")]
+    r_unfocused = compute_reward(**{**BASE,
+        "services_queried": {"unrelated"},
+        "tool_call_history": history_bad})
+    assert r_focused > r_unfocused
+
+
+def test_breadth_not_gated_on_service():
+    r = compute_reward(**{**BASE, "submitted_service": "wrong",
+        "services_queried": {"root-db", "mid-svc"},
+        "tool_call_history": [("read_logs", "root-db"), ("read_logs", "mid-svc")]})
+    assert r > 0.0
+
+
+# ─── Overall Properties ─────────────────────────────────────────────
+
+def test_reward_range():
+    for svc in ["root-db", "wrong", "mid-svc"]:
+        r = compute_reward(**{**BASE, "submitted_service": svc})
+        assert 0.0 <= r <= 1.0
+
+
+def test_reward_never_exceeds_one():
+    r = compute_reward(**{**BASE,
+        "submitted_failure_type": "config_drift", "true_failure_type": "config_drift",
+        "submitted_chain": ["root-db", "mid-svc", "api-gw"],
+        "services_queried": {"root-db", "mid-svc", "api-gw"},
+        "tool_call_history": [("read_logs", "root-db"), ("check_metric", "root-db"),
+                              ("read_logs", "mid-svc"), ("check_metric", "api-gw")]})
+    assert r <= 1.0
+
+
+def test_gradient_exists():
+    """Reward must increase: wrong < adjacent < correct < +type < +explanation."""
+    r_wrong = compute_reward(**{**BASE, "submitted_service": "wrong", "tool_call_history": []})
+    r_adj = compute_reward(**{**BASE, "submitted_service": "mid-svc", "tool_call_history": []})
+    r_svc = compute_reward(**{**BASE, "tool_call_history": []})
+    r_type = compute_reward(**{**BASE, "submitted_failure_type": "config_drift",
+        "true_failure_type": "config_drift", "tool_call_history": []})
+    assert r_wrong < r_adj < r_svc < r_type
