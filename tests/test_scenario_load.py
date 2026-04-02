@@ -20,8 +20,8 @@ def test_sample_by_difficulty():
 
 def test_sample_by_id():
     loader = ScenarioLoader("scenarios/incidents.jsonl")
-    s = loader.sample(scenario_id="redis_cache_node_failure_001")
-    assert s["id"] == "redis_cache_node_failure_001"
+    s = loader.sample(scenario_id=loader.scenarios[0]["id"])
+    assert s["id"] == loader.scenarios[0]["id"]
 
 
 def test_sample_unknown_id():
