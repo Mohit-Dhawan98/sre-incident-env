@@ -9,10 +9,12 @@ import pytest
 from server.reward import compute_reward
 
 
+# upstream means "called BY". root-db is called by mid-svc, mid-svc by api-gw.
+# Failure propagates: root-db fails → mid-svc (calls root-db) → api-gw (calls mid-svc)
 GRAPH = {
-    "root-db": {"upstream": []},
-    "mid-svc": {"upstream": ["root-db"]},
-    "api-gw": {"upstream": ["mid-svc"]},
+    "root-db": {"upstream": ["mid-svc"]},
+    "mid-svc": {"upstream": ["api-gw"]},
+    "api-gw": {"upstream": []},
     "unrelated": {"upstream": ["api-gw"]},
 }
 

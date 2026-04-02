@@ -63,8 +63,12 @@ def _get_causal_chain_services(
 ) -> Set[str]:
     """Derive services in the failure propagation path via BFS from root.
 
-    Failure propagates from root → services that depend on root (call root)
-    → services that depend on those, etc.
+    Failure propagates upstream: root fails → its callers are affected
+    → their callers are affected, etc.
+
+    In our graph, svc.upstream = [list of services that CALL this svc].
+    So product-cache.upstream = [checkout-service] means checkout calls product-cache.
+    When product-cache fails, checkout-service is affected (its dependency broke).
     """
     if not services_graph:
         return {root_service.lower()}
@@ -73,13 +77,8 @@ def _get_causal_chain_services(
     for name, info in services_graph.items():
         graph_lower[name.lower()] = [u.lower() for u in info.get("upstream", [])]
 
-    # Build reverse graph: who depends on whom
-    dependents = {}  # service → list of services that call it
-    for name, upstreams in graph_lower.items():
-        for u in upstreams:
-            dependents.setdefault(u, []).append(name)
-
-    # BFS from root through dependents
+    # "upstream" = callers of this service. When a service fails,
+    # its callers are affected. So failure propagates TO the upstream list.
     root_lower = root_service.strip().lower()
     visited = set()
     queue = [root_lower]
@@ -88,9 +87,10 @@ def _get_causal_chain_services(
         if svc in visited:
             continue
         visited.add(svc)
-        for dep in dependents.get(svc, []):
-            if dep not in visited:
-                queue.append(dep)
+        # This service's callers (upstream) are affected by its failure
+        for caller in graph_lower.get(svc, []):
+            if caller not in visited:
+                queue.append(caller)
 
     return visited
 
@@ -182,7 +182,7 @@ def compute_reward(
         # ── Component 4: Causal Chain Validity (0.10) ────────────────
         # Edge-fraction: score = valid_edges / total_edges
         chain_score = 0.0
-        if submitted_chain and len(submitted_chain) >= 2:
+        if submitted_chain and len(submitted_chain) >= 1:
             chain_lower = [s.strip().lower() for s in submitted_chain]
             all_lower = {s.lower() for s in all_services}
 
@@ -202,10 +202,16 @@ def compute_reward(
                     for i in range(total_edges):
                         svc_from = chain_lower[i]
                         svc_to = chain_lower[i + 1]
-                        # svc_to depends on svc_from
-                        if svc_from in graph_lower.get(svc_to, []):
+                        # Failure propagates: svc_from fails → svc_to (caller) is affected.
+                        # svc_to calls svc_from, meaning svc_to is in svc_from's upstream list.
+                        upstream_of_from = graph_lower.get(svc_from, [])
+                        if svc_to in upstream_of_from:
                             valid_edges += 1
-                    chain_score = (valid_edges / total_edges) * 0.10 if total_edges > 0 else 0.0
+                    if total_edges > 0:
+                        chain_score = (valid_edges / total_edges) * 0.10
+                    else:
+                        # Single-service chain (root is leaf node) — valid
+                        chain_score = 0.10
                 else:
                     # No graph — basic validation only
                     chain_score = 0.10
