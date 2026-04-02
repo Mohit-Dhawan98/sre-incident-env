@@ -22,7 +22,7 @@ def test_full_episode_easy(env):
     obs = env.reset(seed=42, difficulty="easy")
     assert not obs.done
     assert obs.reward == 0.0
-    assert obs.metadata["query_budget"] > 0
+    assert "difficulty" in obs.metadata
 
     # List services (free)
     obs = env.step(CallToolAction(tool_name="list_services", arguments={}))
@@ -56,7 +56,7 @@ def test_full_episode_easy(env):
 
 def test_full_episode_medium(env):
     obs = env.reset(seed=123, difficulty="medium")
-    assert obs.metadata["query_budget"] > 0
+    assert "difficulty" in obs.metadata
 
     obs = env.step(CallToolAction(tool_name="list_services", arguments={}))
     data = _tool_data(obs)
@@ -96,14 +96,14 @@ def test_invalid_service_returns_empty(env):
 
 
 def test_budget_exhaustion(env):
-    obs = env.reset(seed=42, difficulty="easy")  # budget = 8
-    budget = obs.metadata["query_budget"]
-    for i in range(budget):
+    env.reset(seed=42, difficulty="easy")  # budget = 100
+    # Use 100 queries to exhaust budget
+    for i in range(100):
         env.step(CallToolAction(
             tool_name="read_logs",
             arguments={"service": "any", "window_minutes": 5},
         ))
-    # budget+1 query should exhaust
+    # 101st query should exhaust
     obs = env.step(CallToolAction(
         tool_name="read_logs",
         arguments={"service": "any", "window_minutes": 5},
