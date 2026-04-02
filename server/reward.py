@@ -116,6 +116,7 @@ def compute_reward(
     tool_call_history: List[Tuple[str, str]] = (),
     true_causal_chain: List[str] = (),
     optimal_queries: int = 10,
+    explanation_keywords: List[str] = (),
 ) -> float:
     """Compute ungameable + learnable reward for incident diagnosis.
 
@@ -160,58 +161,31 @@ def compute_reward(
         )
 
         # ── Component 3: Root Cause Explanation (0.20) ───────────────
-        # Hybrid: embedding similarity (0.10) + keyword overlap (0.10)
-        # Embedding alone is too forgiving — "database overloaded" matches
-        # "connection pool exhausted" with high similarity.
-        # Keyword overlap checks if specific terms from the golden statement
-        # appear in the submission.
-        submitted_text = submitted_root_cause.strip()
-        if not submitted_text:
+        # Keyword checklist: golden data defines specific keywords the
+        # explanation must contain (root service, mechanism words, downstream).
+        # Score = fraction of keywords found in submission.
+        # Clean signal: each keyword is deliberately chosen, no noise.
+        submitted_text = submitted_root_cause.strip().lower()
+        if not submitted_text or len(submitted_text) < 10:
             semantic_score = 0.0
+        elif explanation_keywords:
+            found = 0
+            for keyword in explanation_keywords:
+                if keyword.lower() in submitted_text:
+                    found += 1
+            semantic_score = (found / len(explanation_keywords)) * 0.20
         else:
-            # Part A: Embedding similarity — COMMENTED OUT
-            # Pure Jaccard is more precise for our use case:
-            # - Rewards specific technical vocabulary
-            # - Doesn't give false credit for "sounds similar but wrong"
-            # - Fully deterministic, no model loading needed
-            # embedding_score = 0.0  # disabled
-
-            # Length penalty
-            text_len = len(submitted_text)
-            if text_len < 20:
-                length_factor = 0.0
-            elif text_len > 500:
-                length_factor = max(0.3, 500.0 / text_len)
-            else:
-                length_factor = 1.0
-
-            # Keyword/Jaccard overlap (0.20 — full weight)
-            # Extract significant words (3+ chars, not stopwords)
+            # Fallback to simple Jaccard if no checklist defined
             stopwords = {'the', 'and', 'was', 'for', 'that', 'with', 'from',
                          'this', 'are', 'were', 'been', 'has', 'had', 'not',
-                         'but', 'all', 'its', 'due', 'causing', 'caused',
-                         'which', 'when', 'into', 'after', 'during', 'then'}
-            def extract_keywords(text):
-                words = set()
-                for w in text.lower().split():
-                    w = w.strip('.,;:()[]"\'')
-                    if len(w) >= 3 and w not in stopwords:
-                        words.add(w)
-                return words
-
-            true_kw = extract_keywords(true_root_cause)
-            sub_kw = extract_keywords(submitted_text)
-
-            if true_kw:
-                # Jaccard: intersection / union
-                intersection = len(true_kw & sub_kw)
-                union = len(true_kw | sub_kw)
-                jaccard = intersection / union if union > 0 else 0
-                keyword_score = jaccard * length_factor * 0.20
-            else:
-                keyword_score = 0.0
-
-            semantic_score = keyword_score
+                         'but', 'all', 'its', 'due', 'causing', 'caused'}
+            def extract_kw(text):
+                return {w.strip('.,;:()[]"\'') for w in text.lower().split()
+                        if len(w.strip('.,;:()[]"\'')) >= 3 and w.strip('.,;:()[]"\'') not in stopwords}
+            true_kw = extract_kw(true_root_cause)
+            sub_kw = extract_kw(submitted_text)
+            union = len(true_kw | sub_kw)
+            semantic_score = (len(true_kw & sub_kw) / union * 0.20) if union else 0.0
 
         # ── Component 4: Causal Chain Validity (0.10) ────────────────
         # Compared against golden causal_chain from scenario.

@@ -204,6 +204,7 @@ class SREIncidentEnvironment(MCPEnvironment):
                 tool_call_history=self._tool_call_history,
                 true_causal_chain=self._scenario["failure"].get("causal_chain", []),
                 optimal_queries=self._scenario["failure"].get("optimal_queries", 10),
+                explanation_keywords=self._scenario["failure"].get("explanation_keywords", []),
             )
 
             self._done = True
