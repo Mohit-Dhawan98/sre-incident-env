@@ -158,20 +158,24 @@ def compute_reward(
         )
 
         # ── Component 3: Root Cause Explanation (0.20) ───────────────
+        # Hybrid: embedding similarity (0.10) + keyword overlap (0.10)
+        # Embedding alone is too forgiving — "database overloaded" matches
+        # "connection pool exhausted" with high similarity.
+        # Keyword overlap checks if specific terms from the golden statement
+        # appear in the submission.
         submitted_text = submitted_root_cause.strip()
         if not submitted_text:
             semantic_score = 0.0
         else:
+            # Part A: Embedding similarity (0.10)
             model = _get_model()
             emb_sub = model.encode(submitted_text, convert_to_tensor=True)
             emb_true = model.encode(true_root_cause, convert_to_tensor=True)
             sim = float(util.cos_sim(emb_sub, emb_true).item())
-
-            # Map [0.60, 1.0] → [0, 1] with power curve
             raw = max(0.0, (sim - 0.60) / 0.40)
             curved = raw ** 1.5
 
-            # Length penalty: too short = no explanation, too long = kitchen sink
+            # Length penalty
             text_len = len(submitted_text)
             if text_len < 20:
                 length_factor = 0.0
@@ -180,7 +184,35 @@ def compute_reward(
             else:
                 length_factor = 1.0
 
-            semantic_score = curved * length_factor * 0.20
+            embedding_score = curved * length_factor * 0.10
+
+            # Part B: Keyword/Jaccard overlap (0.10)
+            # Extract significant words (3+ chars, not stopwords)
+            stopwords = {'the', 'and', 'was', 'for', 'that', 'with', 'from',
+                         'this', 'are', 'were', 'been', 'has', 'had', 'not',
+                         'but', 'all', 'its', 'due', 'causing', 'caused',
+                         'which', 'when', 'into', 'after', 'during', 'then'}
+            def extract_keywords(text):
+                words = set()
+                for w in text.lower().split():
+                    w = w.strip('.,;:()[]"\'')
+                    if len(w) >= 3 and w not in stopwords:
+                        words.add(w)
+                return words
+
+            true_kw = extract_keywords(true_root_cause)
+            sub_kw = extract_keywords(submitted_text)
+
+            if true_kw:
+                # Jaccard-like: intersection / union
+                intersection = len(true_kw & sub_kw)
+                union = len(true_kw | sub_kw)
+                jaccard = intersection / union if union > 0 else 0
+                keyword_score = jaccard * 0.10
+            else:
+                keyword_score = 0.0
+
+            semantic_score = embedding_score + keyword_score
 
         # ── Component 4: Causal Chain Validity (0.10) ────────────────
         # Compared against golden causal_chain from scenario.
