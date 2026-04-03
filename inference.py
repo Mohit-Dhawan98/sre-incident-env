@@ -43,38 +43,48 @@ from openai import OpenAI
 API_BASE_URL = os.getenv("API_BASE_URL") or "https://api.openai.com/v1"
 API_KEY = os.getenv("HF_TOKEN") or os.getenv("OPENAI_API_KEY") or os.getenv("API_KEY")
 MODEL = os.getenv("MODEL_NAME") or "gpt-4o"
-MAX_STEPS = 100  # Match env budget — let the env handle termination
+MAX_STEPS = 200  # V2: remediation needs room to try, fail, investigate, retry
 CONTEXT_CHAR_LIMIT = 120000  # ~30k tokens — summarize when total chars exceed this
 VERBOSE = True
 
-SYSTEM_PROMPT = """You are an expert Site Reliability Engineer investigating a production incident.
+SYSTEM_PROMPT = """You are an expert on-call Site Reliability Engineer responding to a production incident.
 
-# YOUR TASK
-Identify the root cause: which service has the original defect, what specific mechanism failed, and how the failure propagated to other services.
+# MISSION
+Investigate the incident, identify the root cause, FIX the problem, and verify resolution.
+This is a LIVE system — your actions have real consequences. Wrong fixes can make things worse.
 
-# AVAILABLE TOOLS
-- list_services: See the services involved in this incident
+# TOOLS
+
+## Discovery (understand the system)
+- list_services: See all services in the incident topology
 - read_logs: Read logs for a service (filter by level: ERROR, WARN, INFO)
 - check_metric: Check a metric time-series for a service
-- submit_diagnosis: Submit your root cause analysis when ready
+- get_service_info: Get the service runbook — available actions, config params, recent deploys
 
-# HOW TO INVESTIGATE
-1. Start by listing services to understand the topology
-2. Read error logs across services to find which ones are affected
-3. For each affected service, determine: is it the SOURCE of the problem, or a VICTIM of another service's failure?
-4. Check metrics on suspected root cause services — look for:
-   - Ramp patterns (gradual increase = resource leak or exhaustion)
-   - Step changes (sudden jump = config change or deployment)
-   - Spikes (brief burst = traffic surge or retry storm)
-5. Trace the failure chain: which service broke first, and how did it cascade?
-6. When you've identified the origin and mechanism, submit your diagnosis
+## Platform Remediation (standard SRE actions)
+- restart_service: Bounce a service process (clears runtime state)
+- rollback_deploy: Revert a service to its previous deployment version
+- scale_replicas: Scale a service horizontally (add/remove instances)
 
-# WHAT MAKES A GOOD DIAGNOSIS
-- affected_service: where the problem ORIGINATES (not where errors are loudest)
-- failure_type: specific category (oom_kill, config_drift, disk_full, connection_pool, cert_expiry, replication_lag, cache_stampede, gc_pressure, n_plus_one_query, rate_limit_breach, dns_misconfiguration, thread_pool_starvation, slow_external_api, connection_leak, clock_skew_jwt, library_version_conflict, split_brain_db, circular_dependency_deadlock, bad_index_drop, thundering_herd_deploy, or other)
-- root_cause: specific explanation — "[service] [what went wrong] causing [downstream effects]"
-- causal_chain: ordered list of services from root cause to visible symptom, comma-separated
-- confidence: 0.0 to 1.0
+## Application Remediation (service-specific actions)
+- execute_runbook: Run a service-specific maintenance action discovered via get_service_info
+
+## Resolution
+- verify_resolution: Check if the system is healthy + submit your diagnosis
+
+# PROTOCOL
+1. ORIENT: list_services to see the topology.
+2. INVESTIGATE: read_logs across services to find which are affected and trace the error chain upstream to the origin.
+3. DISCOVER: get_service_info on suspected services to learn what actions, config params, and recent deploys are available.
+4. REMEDIATE: Apply a fix based on your diagnosis. The right fix depends on what you found — there is no single approach that works everywhere.
+5. OBSERVE: After ANY remediation, call read_logs to see what changed. The system will show you the outcome. Adjust your approach based on what you see.
+6. VERIFY: When the system is healthy, call verify_resolution with your diagnosis.
+
+# CRITICAL RULES
+- DISCOVER BEFORE FIXING: Call get_service_info before using execute_runbook — it tells you valid action names and config keys.
+- OBSERVE AFTER FIXING: Always read_logs after a remediation to check the outcome.
+- CAUSE ≠ EFFECT: The service with the most errors is usually a VICTIM, not the cause. Trace upstream.
+- WRONG FIXES HAVE CONSEQUENCES: The system will tell you if your action made things worse. Read the outcome and adjust.
 """
 
 
@@ -319,7 +329,7 @@ async def run_episode(
             if consecutive_text >= 3:
                 chat_history.append({
                     "role": "user",
-                    "content": "You MUST call submit_diagnosis NOW with your best guess.",
+                    "content": "You MUST call verify_resolution NOW with your best diagnosis. If you haven't fixed the system yet, call it anyway — you'll get partial credit for a correct diagnosis.",
                 })
             else:
                 chat_history.append({

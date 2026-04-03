@@ -37,7 +37,10 @@ class SREIncidentEnvironment(MCPEnvironment):
         self._register_tools(mcp)
         super().__init__(mcp)
 
-        scenario_path = Path(__file__).parent.parent / "scenarios" / "incidents.jsonl"
+        # Use V2 scenarios if available, fall back to V1
+        v2_path = Path(__file__).parent.parent / "scenarios" / "incidents_v2.jsonl"
+        v1_path = Path(__file__).parent.parent / "scenarios" / "incidents.jsonl"
+        scenario_path = v2_path if v2_path.exists() else v1_path
         self.loader = ScenarioLoader(str(scenario_path))
 
         # Episode state
