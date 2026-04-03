@@ -1,3 +1,12 @@
+---
+title: SRE Incident Response Environment
+emoji: 🔧
+colorFrom: red
+colorTo: gray
+sdk: docker
+app_port: 8000
+---
+
 # SRE Incident Response Environment
 
 An OpenEnv RL environment that simulates on-call Site Reliability Engineering. An AI agent receives a production incident alert, investigates by querying service logs and metrics across a multi-service architecture, traces causal chains through red herrings and cascading failures, and submits a root-cause diagnosis. The environment scores it automatically — zero LLM calls at runtime, fully deterministic.
