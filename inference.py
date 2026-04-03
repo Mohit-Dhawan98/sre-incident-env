@@ -32,7 +32,7 @@ from typing import Any, Dict, List
 
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(override=False)  # Don't override env vars set by the caller
 
 from openai import OpenAI
 
