@@ -306,7 +306,7 @@ async def run_episode(
                 chat_history.append({
                     "role": "tool",
                     "tool_call_id": tool_call_id,
-                    "content": "Error: malformed arguments. Please retry with valid JSON.",
+                    "content": f"Error: your tool call had malformed JSON arguments: {tool_call.function.arguments[:200]}. Please retry with valid JSON.",
                 })
                 if VERBOSE:
                     print(f"    T{step_count}: {tool_name}(...) [bad JSON, skipped]")
