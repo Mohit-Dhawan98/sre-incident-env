@@ -13,8 +13,7 @@ wheels/
 .env
 
 # Benchmark files
-benchmark*.json
-benchmark*.py
+benchmarks/
 .DS_Store
 
 # Extra scenarios (parked for now)
