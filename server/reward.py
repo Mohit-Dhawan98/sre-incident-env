@@ -115,11 +115,22 @@ def compute_reward(
     true_causal_chain: List[str] = (),
     optimal_queries: int = 10,
     explanation_keywords: List[str] = (),
+    # V2 remediation params (optional — V1 scenarios pass defaults)
+    system_healthy: bool = False,
+    remediation_attempts: int = 0,
+    harm_count: int = 0,
+    correct_fix_used: bool = False,
+    first_try_correct: bool = False,
 ) -> float:
-    """Compute ungameable + learnable reward for incident diagnosis.
+    """Compute ungameable + learnable reward for incident diagnosis + remediation.
+
+    V1 mode (no remediation data): Uses original 7-component scoring.
+    V2 mode (remediation data present): Uses 4-tier scoring with remediation.
 
     Returns float in [0.0, 1.0].
     """
+    # Detect V2 mode: if any remediation param is non-default, use V2 scoring
+    is_v2 = remediation_attempts > 0 or system_healthy or harm_count > 0
 
     # ══════════════════════════════════════════════════════════════════
     # TIER 1: DIAGNOSIS QUALITY (0.70)
@@ -330,17 +341,75 @@ def compute_reward(
         query_efficiency_score = 0.20
 
     # ══════════════════════════════════════════════════════════════════
-    # TOTAL
+    # TOTAL (V1 or V2)
     # ══════════════════════════════════════════════════════════════════
 
-    total = (
-        service_score
-        + type_score
-        + semantic_score
-        + chain_score
-        + efficiency_score
-        + breadth_score
-        + query_efficiency_score
-    )
+    if not is_v2:
+        # V1 mode: original 7-component scoring (investigation + diagnosis only)
+        total = (
+            service_score
+            + type_score
+            + semantic_score
+            + chain_score
+            + efficiency_score
+            + breadth_score
+            + query_efficiency_score
+        )
+        return round(min(1.0, max(0.0, total)), 4)
+
+    # ══════════════════════════════════════════════════════════════════
+    # V2 MODE: 4-TIER SCORING (investigation + diagnosis + remediation + harm)
+    # ══════════════════════════════════════════════════════════════════
+    #
+    # Tier 1 — Investigation Quality (0.15): breadth + efficiency
+    # Tier 2 — Diagnosis Accuracy (0.35): service + type + chain + keywords (GATED)
+    # Tier 3 — Remediation Effectiveness (0.40): system fixed + correct action + first try
+    # Tier 4 — Harm Avoidance (0.10): no trap doors + remediation efficiency
+
+    # Tier 1: Investigation (0.15) — rescale from V1 values
+    v2_investigation = min(0.15, (breadth_score / 0.07) * 0.08 + (efficiency_score / 0.08) * 0.07)
+
+    # Tier 2: Diagnosis (0.35) — rescale from V1 Tier 1 values
+    # service_score max 0.25 → scale to 0.15
+    v2_service = (service_score / 0.25) * 0.15 if service_score > 0 else 0.0
+    # type_score max 0.15 → scale to 0.08
+    v2_type = (type_score / 0.15) * 0.08 if type_score > 0 else 0.0
+    # chain_score max 0.15 → scale to 0.07
+    v2_chain = (chain_score / 0.15) * 0.07 if chain_score > 0 else 0.0
+    # semantic_score max 0.10 → scale to 0.05
+    v2_keywords = (semantic_score / 0.10) * 0.05 if semantic_score > 0 else 0.0
+    v2_diagnosis = v2_service + v2_type + v2_chain + v2_keywords
+
+    # Tier 3: Remediation (0.40)
+    # System fixed: 0.20
+    v2_system_fixed = 0.20 if system_healthy else 0.0
+    # Correct fix action used: 0.12
+    v2_correct_fix = 0.12 if correct_fix_used else 0.0
+    # First-try bonus: 0.08 (decays with attempts)
+    if first_try_correct:
+        v2_first_try = 0.08
+    elif correct_fix_used and remediation_attempts > 0:
+        v2_first_try = 0.08 * (1.0 / remediation_attempts)
+    else:
+        v2_first_try = 0.0
+    v2_remediation = v2_system_fixed + v2_correct_fix + v2_first_try
+
+    # Tier 4: Harm Avoidance (0.10)
+    # No trap doors: 0.06 (deduct 0.03 per harm event)
+    v2_no_harm = max(0.0, 0.06 - harm_count * 0.03)
+    # Remediation efficiency: 0.04 (fewer attempts = better)
+    if remediation_attempts <= 2:
+        v2_rem_efficiency = 0.04
+    elif remediation_attempts <= 5:
+        v2_rem_efficiency = 0.04 * (1.0 - (remediation_attempts - 2) / 6)
+    else:
+        v2_rem_efficiency = 0.0
+    v2_harm = v2_no_harm + v2_rem_efficiency
+
+    total = v2_investigation + v2_diagnosis + v2_remediation + v2_harm
+
+    # Harm floor: if system worsened and not fixed, cap at 0.15
+    if not system_healthy and harm_count > 0:
+        total = min(total, 0.15)
 
     return round(min(1.0, max(0.0, total)), 4)

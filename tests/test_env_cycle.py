@@ -96,14 +96,14 @@ def test_invalid_service_returns_empty(env):
 
 
 def test_budget_exhaustion(env):
-    env.reset(seed=42, difficulty="easy")  # budget = 100
-    # Use 100 queries to exhaust budget
-    for i in range(100):
+    env.reset(seed=42, difficulty="easy")  # budget = 200
+    # Use 200 queries to exhaust budget
+    for i in range(200):
         env.step(CallToolAction(
             tool_name="read_logs",
             arguments={"service": "any", "window_minutes": 5},
         ))
-    # 101st query should exhaust
+    # 201st query should exhaust
     obs = env.step(CallToolAction(
         tool_name="read_logs",
         arguments={"service": "any", "window_minutes": 5},
