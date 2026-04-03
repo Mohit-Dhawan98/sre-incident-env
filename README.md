@@ -156,10 +156,29 @@ python inference.py --space https://Maverick98-sre-incident-env.hf.space
 python inference.py --difficulty hard --episodes 3
 ```
 
+## Training with Real Incident Data
+
+The environment is a **pluggable framework**, not just 17 fixed scenarios. Any organization can convert their past incidents into training data:
+
+```bash
+export OPENENV_CUSTOM_REGISTRY=/path/to/your_incidents.jsonl
+```
+
+Each incident in the JSONL defines: service topology, log templates, metric patterns, golden root cause, causal chain, and explanation keywords. The reward function works unchanged — it scores against the golden data in each incident.
+
+**Why this matters for RL training:**
+- A company with 500 past P0/P1 incidents = 500 training episodes
+- The agent learns patterns from YOUR specific infrastructure
+- Difficulty scales naturally — real incidents range from obvious to obscure
+- Deterministic reward enables stable RL gradients
+- Partial credit (Tier 2: investigation quality) provides signal even on wrong diagnoses
+
+See [`scenarios/schema.md`](scenarios/schema.md) for the JSONL format and [`scenarios/difficulty_calibration.md`](scenarios/difficulty_calibration.md) for the 4-dimension difficulty framework.
+
 ## Architecture
 
 - **Environment server**: MCPEnvironment (FastMCP) with 4 tools
-- **Reward**: Fully deterministic, no model dependencies
-- **Scenarios**: 17 (5 easy + 5 medium + 5 hard + 2 expert)
+- **Reward**: Fully deterministic, 7 components, no model dependencies
+- **Scenarios**: 17 built-in (5 easy + 5 medium + 5 hard + 2 expert) + custom JSONL registry
 - **Client**: MCPToolClient (async/sync), installable via pip
 - **Inference**: Native OpenAI function calling, smart context summarization

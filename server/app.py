@@ -20,8 +20,8 @@ def main() -> None:
         app,
         host="0.0.0.0",
         port=8000,
-        ws_ping_interval=30,
-        ws_ping_timeout=120,
+        ws_ping_interval=None,
+        ws_ping_timeout=None,
     )
 
 

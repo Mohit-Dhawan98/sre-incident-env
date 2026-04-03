@@ -39,6 +39,6 @@ class SREIncidentEnv(MCPToolClient):
             self._ws_url,
             open_timeout=self._connect_timeout,
             max_size=getattr(self, "_max_message_size", 50 * 1024 * 1024),
-            ping_interval=30,
-            ping_timeout=120,
+            ping_interval=None,
+            ping_timeout=None,
         )
