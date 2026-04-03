@@ -28,4 +28,17 @@ class SREIncidentEnv(MCPToolClient):
     - step(action): Execute an action (for advanced use)
     """
 
-    pass
+    async def _connect(self):
+        """Override to set longer WebSocket ping timeout for slow LLM models."""
+        from websockets.asyncio.client import connect as ws_connect
+
+        if self._ws is not None:
+            return
+
+        self._ws = await ws_connect(
+            self._ws_url,
+            open_timeout=self._connect_timeout,
+            max_size=getattr(self, "_max_message_size", 50 * 1024 * 1024),
+            ping_interval=30,
+            ping_timeout=120,
+        )

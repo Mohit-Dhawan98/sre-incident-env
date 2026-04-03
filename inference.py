@@ -342,35 +342,18 @@ async def run_episode(
                 print(" [unknown tool]")
             continue
 
-        # Execute in environment (with one reconnect retry on WebSocket errors)
-        step_result = None
-        for attempt in range(2):
-            try:
-                action = CallToolAction(tool_name=tool_name, arguments=tool_args)
-                step_result = await env.step(action)
-                break
-            except Exception as e:
-                err_str = str(e).lower()
-                is_ws_error = any(k in err_str for k in ["1011", "keepalive", "websocket", "close frame", "connection closed"])
-                if is_ws_error and attempt == 0:
-                    if VERBOSE:
-                        print(f" [ws error, reconnecting...]", end="", flush=True)
-                    try:
-                        await env.close()
-                    except Exception:
-                        pass
-                    env = SREIncidentEnv(base_url=env_base_url)
-                    await env.reset(difficulty=difficulty)
-                    continue
-                chat_history.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call_id,
-                    "content": f"Error: {e}",
-                })
-                if VERBOSE:
-                    print(f" [error: {e}]")
-                break
-        if step_result is None:
+        # Execute in environment
+        try:
+            action = CallToolAction(tool_name=tool_name, arguments=tool_args)
+            step_result = await env.step(action)
+        except Exception as e:
+            chat_history.append({
+                "role": "tool",
+                "tool_call_id": tool_call_id,
+                "content": f"Error: {e}",
+            })
+            if VERBOSE:
+                print(f" [error: {e}]")
             continue
 
         # Extract result
