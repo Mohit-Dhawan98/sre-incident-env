@@ -13,7 +13,6 @@ COPY . /app/
 # Install dependencies
 RUN pip install --no-cache-dir \
     "openenv-core[core]>=0.2.2" \
-    "sentence-transformers>=2.7.0" \
     "pydantic>=2.0.0" \
     "fastapi>=0.115.0" \
     "uvicorn>=0.24.0" \
@@ -21,9 +20,6 @@ RUN pip install --no-cache-dir \
     "openai>=2.7.2" \
     "requests>=2.31.0" \
     "python-dotenv"
-
-# Pre-download embedding model at build time (non-gated, no auth needed)
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('sentence-transformers/all-mpnet-base-v2')"
 
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH="/app:$PYTHONPATH"

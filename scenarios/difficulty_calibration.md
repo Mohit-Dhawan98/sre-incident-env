@@ -57,14 +57,16 @@ Is this a failure pattern that LLMs have seen in training data?
 
 **Budget is inverted**: harder incidents get MORE queries, like a real P0 getting all hands on deck. Difficulty comes from content complexity, not resource starvation.
 
-## Current Distribution
+## Current Distribution (Calibrated via Joint Benchmark)
 
-| Difficulty | Count | Score Range |
-|------------|-------|-------------|
-| Easy | 4 | 1-2 |
-| Medium | 12 | 3-4 |
-| Hard | 11 | 5-6 |
-| Expert | 0 | 7-8 (none yet — would need invisible root + no traceability + high noise + obscure mechanism) |
+Difficulty tiers are assigned based on joint consensus scores from o4-mini and gemini-2.5-flash, not just the 4-dimension framework. The framework guides scenario design; actual model performance determines the final tier.
+
+| Difficulty | Count | Joint Score Range | Avg Score |
+|------------|-------|-------------------|-----------|
+| Easy | 5 | 0.57–0.84 | ~0.67 |
+| Medium | 3 | 0.39–0.48 | ~0.43 |
+| Hard | 7 | 0.31–0.34 | ~0.32 |
+| Expert | 2 | 0.23–0.26 | ~0.24 |
 
 ## How to Create Expert Scenarios
 

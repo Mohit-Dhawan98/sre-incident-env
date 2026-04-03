@@ -16,3 +16,6 @@ wheels/
 benchmark*.json
 benchmark*.py
 .DS_Store
+
+# Extra scenarios (parked for now)
+scenarios/incidents_extra.jsonl
