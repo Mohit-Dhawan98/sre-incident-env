@@ -11,6 +11,7 @@ app = create_app(
     CallToolAction,
     CallToolObservation,
     env_name="sre_incident_env",
+    max_concurrent_envs=5,
 )
 
 
