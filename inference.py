@@ -11,8 +11,13 @@ Required env vars:
     HF_TOKEN       — HuggingFace / API key for the LLM
 
 Usage:
+    # Run all difficulty tiers (1 episode each) — default for baseline scoring
     python inference.py
+
+    # Run against HF Space
     python inference.py --space https://Maverick98-sre-incident-env.hf.space
+
+    # Run a single difficulty with multiple episodes
     python inference.py --difficulty hard --episodes 3 --model o4-mini
 """
 
@@ -36,7 +41,7 @@ from openai import OpenAI
 # ---------------------------------------------------------------------------
 
 API_BASE_URL = os.getenv("API_BASE_URL") or "https://api.openai.com/v1"
-API_KEY = os.getenv("OPENAI_API_KEY") or os.getenv("API_KEY") or os.getenv("HF_TOKEN")
+API_KEY = os.getenv("HF_TOKEN") or os.getenv("OPENAI_API_KEY") or os.getenv("API_KEY")
 MODEL = os.getenv("MODEL_NAME") or "gpt-4o"
 MAX_STEPS = 100  # Match env budget — let the env handle termination
 CONTEXT_CHAR_LIMIT = 120000  # ~30k tokens — summarize when total chars exceed this
@@ -407,16 +412,18 @@ async def run_episode(
 
 async def async_main() -> None:
     parser = argparse.ArgumentParser(description="SRE Incident Env Inference")
-    parser.add_argument("--difficulty", default="medium",
-                        choices=["easy", "medium", "hard", "expert"])
-    parser.add_argument("--episodes", type=int, default=3)
+    parser.add_argument("--difficulty", default=None,
+                        choices=["easy", "medium", "hard", "expert"],
+                        help="Run a single difficulty. Omit to run all tiers.")
+    parser.add_argument("--episodes", type=int, default=1,
+                        help="Episodes per difficulty tier (default: 1)")
     parser.add_argument("--model", default=None)
     parser.add_argument("--space", default=None,
                         help="HF Space URL. If omitted, runs locally.")
     args = parser.parse_args()
 
     if not API_KEY:
-        print("Error: Set OPENAI_API_KEY, API_KEY, or HF_TOKEN.")
+        print("Error: Set HF_TOKEN, OPENAI_API_KEY, or API_KEY.")
         sys.exit(1)
 
     model = args.model or MODEL
@@ -439,8 +446,15 @@ async def async_main() -> None:
         time.sleep(3)
         mode = "local (http://127.0.0.1:8000)"
 
+    # Determine which difficulties to run
+    if args.difficulty:
+        difficulties = [args.difficulty]
+    else:
+        difficulties = ["easy", "medium", "hard", "expert"]
+
     try:
-        await env.reset(difficulty=args.difficulty)
+        # Discover tools once
+        await env.reset(difficulty="easy")
         mcp_tools = await env.list_tools()
         tools = mcp_tools_to_openai(mcp_tools)
 
@@ -448,25 +462,42 @@ async def async_main() -> None:
             print(f"Mode: {mode}")
             print(f"Model: {model}")
             print(f"Tools: {[t['function']['name'] for t in tools]}")
-            print(f"Difficulty: {args.difficulty} | Episodes: {args.episodes}")
+            print(f"Difficulties: {difficulties} | Episodes per tier: {args.episodes}")
             print("=" * 60)
 
-        results = []
-        for i in range(args.episodes):
-            print(f"\nEpisode {i+1}/{args.episodes}:")
-            result = await run_episode(env, llm_client, model, tools, args.difficulty)
-            results.append(result)
+        all_results: Dict[str, List[Dict[str, Any]]] = {}
 
-        valid = [r for r in results if "error" not in r]
-        avg = sum(r["reward"] for r in valid) / len(valid) if valid else 0
-        errors = len(results) - len(valid)
+        for difficulty in difficulties:
+            print(f"\n{'─' * 40}")
+            print(f"  Difficulty: {difficulty.upper()}")
+            print(f"{'─' * 40}")
 
+            tier_results = []
+            for i in range(args.episodes):
+                print(f"\n  Episode {i+1}/{args.episodes}:")
+                result = await run_episode(
+                    env, llm_client, model, tools, difficulty
+                )
+                tier_results.append(result)
+            all_results[difficulty] = tier_results
+
+        # Summary
         print(f"\n{'=' * 60}")
-        print(f"Results ({args.difficulty}, {model}):")
-        for i, r in enumerate(results):
-            status = f"reward={r['reward']:.4f}" if "error" not in r else f"error={r['error'][:40]}"
-            print(f"  Episode {i+1}: {status}")
-        print(f"  Average: {avg:.4f} ({len(valid)} valid, {errors} errors)")
+        print(f"BASELINE RESULTS — {model}")
+        print(f"{'=' * 60}")
+        overall_rewards = []
+        for difficulty, results in all_results.items():
+            valid = [r for r in results if "error" not in r]
+            avg = sum(r["reward"] for r in valid) / len(valid) if valid else 0
+            errors = len(results) - len(valid)
+            overall_rewards.extend(r["reward"] for r in valid)
+            print(f"  {difficulty:8s}: avg={avg:.4f} ({len(valid)} valid, {errors} errors)")
+            for i, r in enumerate(results):
+                status = f"reward={r['reward']:.4f}" if "error" not in r else f"error={r['error'][:40]}"
+                print(f"    Episode {i+1}: {status}")
+
+        if overall_rewards:
+            print(f"\n  OVERALL: avg={sum(overall_rewards)/len(overall_rewards):.4f} across {len(overall_rewards)} episodes")
 
     finally:
         await env.close()
