@@ -11,3 +11,8 @@ wheels/
 
 # Environment secrets
 .env
+
+# Benchmark files
+benchmark*.json
+benchmark*.py
+.DS_Store
