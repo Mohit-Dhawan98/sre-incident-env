@@ -50,10 +50,10 @@ The agent has a generous query budget (100) — difficulty comes from scenario c
 
 | Tier | Count | Avg Score (frontier models) | What Makes It Hard |
 |------|-------|---------------------------|-------------------|
-| **Easy** | 5 | ~0.67 | Familiar failure patterns, clear signals, some investigation needed |
-| **Medium** | 5 | ~0.39 | Multiple suspects, misleading red herrings, ambiguous metrics |
-| **Hard** | 5 | ~0.32 | Invisible root, deep chains, obscure mechanisms, no breadcrumbs |
-| **Expert** | 2 | ~0.24 | Invisible root + no metric clues + obscure infrastructure failures |
+| **Easy** | 5 | ~0.64 | Familiar failure patterns, clear signals, some investigation needed |
+| **Medium** | 5 | ~0.52 | Multiple suspects, misleading red herrings, ambiguous metrics |
+| **Hard** | 5 | ~0.35 | Deep chains, obscure mechanisms, multiple red herrings |
+| **Expert** | 2 | ~0.19 | Invisible root, no metric clues, obscure kernel/infrastructure failures |
 
 17 scenarios calibrated using joint consensus of o4-mini and gemini-2.5-flash. Hard/expert feature real production failures: NUMA cross-socket latency, CPU TSC drift, JVM metaspace exhaustion, Kafka partition rebalancing storms.
 
@@ -86,9 +86,9 @@ Reproducible scores from `inference.py` (1 episode per tier):
 
 | Model | Easy | Medium | Hard | Expert | Overall |
 |-------|------|--------|------|--------|---------|
-| gpt-4o-mini | 0.91 | 0.42 | 0.28 | 0.15 | 0.44 |
-| o4-mini | 0.84 | 0.48 | 0.34 | 0.26 | 0.48 |
-| gemini-2.5-flash | 0.62 | 0.38 | 0.30 | 0.23 | 0.38 |
+| gpt-5.4 | 0.71 | 0.62 | 0.35 | 0.19 | 0.48 |
+| o4-mini | 0.65 | 0.48 | 0.38 | 0.27 | 0.46 |
+| gemini-2.5-flash | 0.57 | 0.45 | ~0.30 | ~0.15 | 0.40 |
 
 Hard/expert scenarios genuinely challenge frontier models. Easy scenarios are solvable with basic log-following.
 
