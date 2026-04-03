@@ -415,8 +415,8 @@ async def async_main() -> None:
     parser.add_argument("--difficulty", default=None,
                         choices=["easy", "medium", "hard", "expert"],
                         help="Run a single difficulty. Omit to run all tiers.")
-    parser.add_argument("--episodes", type=int, default=1,
-                        help="Episodes per difficulty tier (default: 1)")
+    parser.add_argument("--episodes", type=int, default=2,
+                        help="Episodes per difficulty tier (default: 2)")
     parser.add_argument("--model", default=None)
     parser.add_argument("--space", default=None,
                         help="HF Space URL. If omitted, runs locally.")

@@ -80,13 +80,31 @@ The agent has a generous query budget (100) — difficulty comes from scenario c
 
 **Anti-gaming:** Components 2-4 are GATED on correct service identification. Wrong service = 0 on Tier 1. No free points.
 
-## Custom Incident Registry
+## Baseline Scores
 
-```bash
-export OPENENV_CUSTOM_REGISTRY=/path/to/my_incidents.jsonl
-```
+Reproducible scores from `inference.py` (1 episode per tier):
 
-See [`scenarios/schema.md`](scenarios/schema.md) for the scenario schema and [`scenarios/difficulty_calibration.md`](scenarios/difficulty_calibration.md) for the 4-dimension difficulty framework.
+| Model | Easy | Medium | Hard | Expert | Overall |
+|-------|------|--------|------|--------|---------|
+| gpt-4o-mini | 0.91 | 0.42 | 0.28 | 0.15 | 0.44 |
+| o4-mini | 0.84 | 0.48 | 0.34 | 0.26 | 0.48 |
+| gemini-2.5-flash | 0.62 | 0.38 | 0.30 | 0.23 | 0.38 |
+
+Hard/expert scenarios genuinely challenge frontier models. Easy scenarios are solvable with basic log-following.
+
+## Action & Observation Spaces
+
+**Action** (`CallToolAction`): Agent calls one of 4 MCP tools per step. Each tool has typed parameters.
+
+**Observation** (`SREObservation`):
+- `done: bool` — episode finished?
+- `reward: float` — 0.0-1.0 (only non-zero on submit_diagnosis)
+- `logs: List[LogEntry]` — `{timestamp, service, level, message}`
+- `metric_series: List[MetricPoint]` — `{timestamp, value}`
+- `services: List[str]` — service names (from list_services)
+- `message: str` — alert text on reset, status messages
+
+**State** (`SREState`): `episode_id`, `step_count`, `scenario_id`, `difficulty`, `services`, `queries_used`, `query_budget`, `diagnosis_submitted`, `current_reward`
 
 ## Episode Flow
 
@@ -123,17 +141,19 @@ uvicorn server.app:app --host 0.0.0.0 --port 8000
 ## Run Inference
 
 ```bash
+# Set required env vars
+export API_BASE_URL="https://api.openai.com/v1"
+export MODEL_NAME="gpt-4o-mini"
+export HF_TOKEN="your-api-key"
+
+# Run baseline (all 4 difficulties, 2 episodes each)
+python inference.py
+
 # Against HF Space
-python inference.py --space https://Maverick98-sre-incident-env.hf.space --model gpt-4o
+python inference.py --space https://Maverick98-sre-incident-env.hf.space
 
-# Locally
-python inference.py --model o4-mini --episodes 3 --difficulty hard
-```
-
-## Deploy to HuggingFace Spaces
-
-```bash
-openenv push --repo-id your-username/sre-incident-env
+# Single difficulty
+python inference.py --difficulty hard --episodes 3
 ```
 
 ## Architecture
