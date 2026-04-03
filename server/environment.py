@@ -23,6 +23,8 @@ class SREIncidentEnvironment(MCPEnvironment):
     then submits a root-cause diagnosis. Scored via embedding similarity.
     """
 
+    SUPPORTS_CONCURRENT_SESSIONS = True
+
     def __init__(self) -> None:
         mcp = FastMCP("sre_incident_env")
         self._register_tools(mcp)
