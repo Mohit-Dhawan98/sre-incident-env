@@ -227,8 +227,10 @@ async def run_episode(
     difficulty: str = "medium",
     scenario_id: str = None,
     seed: int = None,
+    env_base_url: str = "http://localhost:8000",
 ) -> Dict[str, Any]:
     """Run a single investigation episode using native function calling."""
+    from client import SREIncidentEnv
     from openenv.core.env_server.mcp_types import CallToolAction
 
     tool_names = [t["function"]["name"] for t in tools]
@@ -340,18 +342,35 @@ async def run_episode(
                 print(" [unknown tool]")
             continue
 
-        # Execute in environment
-        try:
-            action = CallToolAction(tool_name=tool_name, arguments=tool_args)
-            step_result = await env.step(action)
-        except Exception as e:
-            chat_history.append({
-                "role": "tool",
-                "tool_call_id": tool_call_id,
-                "content": f"Error: {e}",
-            })
-            if VERBOSE:
-                print(f" [error: {e}]")
+        # Execute in environment (with one reconnect retry on WebSocket errors)
+        step_result = None
+        for attempt in range(2):
+            try:
+                action = CallToolAction(tool_name=tool_name, arguments=tool_args)
+                step_result = await env.step(action)
+                break
+            except Exception as e:
+                err_str = str(e).lower()
+                is_ws_error = any(k in err_str for k in ["1011", "keepalive", "websocket", "close frame", "connection closed"])
+                if is_ws_error and attempt == 0:
+                    if VERBOSE:
+                        print(f" [ws error, reconnecting...]", end="", flush=True)
+                    try:
+                        await env.close()
+                    except Exception:
+                        pass
+                    env = SREIncidentEnv(base_url=env_base_url)
+                    await env.reset(difficulty=difficulty)
+                    continue
+                chat_history.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call_id,
+                    "content": f"Error: {e}",
+                })
+                if VERBOSE:
+                    print(f" [error: {e}]")
+                break
+        if step_result is None:
             continue
 
         # Extract result
@@ -432,11 +451,13 @@ async def async_main() -> None:
     # Connect to environment
     if args.space:
         from client import SREIncidentEnv
-        env = SREIncidentEnv(base_url=args.space)
+        env_base_url = args.space
+        env = SREIncidentEnv(base_url=env_base_url)
         mode = f"remote ({args.space})"
     else:
         from client import SREIncidentEnv
-        env = SREIncidentEnv(base_url="http://localhost:8000")
+        env_base_url = "http://localhost:8000"
+        env = SREIncidentEnv(base_url=env_base_url)
         import subprocess, time
         server_proc = subprocess.Popen(
             [sys.executable, "-m", "uvicorn", "server.app:app",
@@ -476,7 +497,8 @@ async def async_main() -> None:
             for i in range(args.episodes):
                 print(f"\n  Episode {i+1}/{args.episodes}:")
                 result = await run_episode(
-                    env, llm_client, model, tools, difficulty
+                    env, llm_client, model, tools, difficulty,
+                    env_base_url=env_base_url,
                 )
                 tier_results.append(result)
             all_results[difficulty] = tier_results
