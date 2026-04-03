@@ -48,14 +48,14 @@ The agent has a generous query budget (100) — difficulty comes from scenario c
 
 ## Difficulty Tiers
 
-| Tier | Scenarios | What Makes It Hard |
-|------|-----------|-------------------|
-| **Easy** | 5 | Root service has clear error logs, familiar failure patterns |
-| **Medium** | 5 | Root visible but misleading red herrings, multiple suspects |
-| **Hard** | 5 | Root service invisible (0 error logs), deep causal chains (4-5 hops), obscure mechanisms |
-| **Expert** | 5 | Root invisible + no metric clues + 9 services + 3 red herrings sharing symptoms |
+| Tier | Count | Avg Score (frontier models) | What Makes It Hard |
+|------|-------|---------------------------|-------------------|
+| **Easy** | 5 | ~0.51 | Familiar failure patterns, some investigation needed |
+| **Medium** | 4 | ~0.34 | Multiple suspects, misleading red herrings |
+| **Hard** | 5 | ~0.30 | Invisible root, deep chains, obscure mechanisms, no breadcrumbs |
+| **Expert** | 2 | ~0.23 | Invisible root + no metric clues + obscure infrastructure failures |
 
-Difficulty is calibrated using joint consensus of o4-mini and gemini-2.5-flash benchmarks. Hard/expert scenarios feature real production failure patterns: cgroup sidecar OOM, BGP asymmetric routing, JVM metaspace exhaustion, CPU TSC drift, NUMA cross-socket latency.
+16 main scenarios + 20 extra in `incidents_extra.jsonl`. Calibrated using joint consensus of o4-mini and gemini-2.5-flash. Hard/expert feature real production failures: TLS session ticket rotation, NUMA cross-socket latency, CPU TSC drift, JVM metaspace exhaustion.
 
 ## Reward Function (V5)
 
@@ -140,6 +140,6 @@ openenv push --repo-id your-username/sre-incident-env
 
 - **Environment server**: MCPEnvironment (FastMCP) with 4 tools
 - **Reward**: Fully deterministic, no model dependencies
-- **Scenarios**: 20 main + 20 extra in JSONL, procedural log/metric generation
+- **Scenarios**: 16 main (5 easy + 4 medium + 5 hard + 2 expert) + 20 extra in JSONL
 - **Client**: MCPToolClient (async/sync), installable via pip
 - **Inference**: Native OpenAI function calling, smart context summarization
