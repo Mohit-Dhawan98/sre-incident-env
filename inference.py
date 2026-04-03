@@ -292,8 +292,25 @@ async def run_episode(
             consecutive_text = 0
             tool_call = message.tool_calls[0]
             tool_name = tool_call.function.name
-            tool_args = json.loads(tool_call.function.arguments)
             tool_call_id = tool_call.id
+            try:
+                tool_args = json.loads(tool_call.function.arguments)
+            except (json.JSONDecodeError, TypeError):
+                # Model returned malformed JSON — skip this call
+                chat_history.append({
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [{"id": tool_call_id, "type": "function",
+                        "function": {"name": tool_name, "arguments": tool_call.function.arguments}}],
+                })
+                chat_history.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call_id,
+                    "content": "Error: malformed arguments. Please retry with valid JSON.",
+                })
+                if VERBOSE:
+                    print(f"    T{step_count}: {tool_name}(...) [bad JSON, skipped]")
+                continue
         elif message.content:
             consecutive_text += 1
             if VERBOSE:
