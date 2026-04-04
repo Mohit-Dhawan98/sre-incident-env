@@ -1,0 +1,1588 @@
+
+==========================================================================================
+ circular_deadlock_service_dependency_001 (easy, 2-step)
+==========================================================================================
+
+  ■ [broken]
+    DESC: Circular deadlock: L1→L2→L3→L1. All services hung. lock_timeout=0.
+    ──────────────────────────────────────────────────────────────────────
+    → restart_service(lock-manager)
+      → [deadlock_cleared] (progress)
+      MSG: "lock-manager restarted. Lock table cleared. Services resuming. lock_timeout=0ms (still disabled — was set to 0 for performance testing). Under normal traffic load, another deadlock is likely within minutes."
+
+    → execute_runbook(lock-manager, release_all_locks)
+      → [deadlock_cleared] (progress)
+      MSG: "Force-released 3 locks: L1, L2, L3. Deadlock broken. Services resuming. But lock_timeout=0 (disabled for performance testing) — another deadlock is likely within minutes under load."
+
+    ✗ restart_service(service-a)
+      → [svc_crashed] (worsened)
+      MSG: "service-a restarted. Attempting lock L1... BLOCKED — L1 still held in deadlocked lock table. service-a hung again. 340 in-flight orders dropped."
+
+    ✗ restart_service(service-b)
+      → [svc_crashed] (worsened)
+      MSG: "service-b restarted. Lock L2 BLOCKED — deadlocked. Hung again. Inventory reservations lost."
+
+    ✗ restart_service(service-c)
+      → [svc_crashed] (worsened)
+      MSG: "service-c restarted. Lock L3 BLOCKED. Pending payment captures dropped."
+
+    ✗ scale_replicas(lock-manager)
+      → [svc_crashed] (worsened)
+      MSG: "lock-manager scaled. New replica joins shared lock table — deadlocked state is in data, not process. Split-brain risk."
+
+    ○ execute_runbook(circuit-breaker-proxy, reset_all_circuits)
+      → [broken] (no_effect)
+      MSG: "Circuits reset to CLOSED. Traffic flowing to deadlocked services. All requests hanging. Queue growing."
+
+    ○ [anything else] → [broken] (default)
+      MSG: "No change. Circular deadlock persists. L1→L2→L3→L1. All services hung."
+
+  ■ [deadlock_cleared]
+    DESC: Deadlock broken. Services running. But lock_timeout=0 — deadlock will recur on next contention.
+    ──────────────────────────────────────────────────────────────────────
+    ★ execute_runbook(lock-manager, update_config, {'key': 'deadlock_detection_timeout_ms', 'value': '5000'})
+      → [healthy] (recovery)
+      MSG: "lock-manager: deadlock_detection_timeout_ms set to 5000. Deadlocks will be detected and auto-resolved within 5 seconds."
+
+    ★ execute_runbook(lock-manager, update_config, {'key': 'lock_ttl_ms', 'value': '30000'})
+      → [healthy] (recovery)
+      MSG: "lock-manager: lock_ttl_ms set to 30000. Locks expire after 30s — prevents indefinite holding."
+
+    ★ execute_runbook(lock-manager, enable_deadlock_detection)
+      → [healthy] (recovery)
+      MSG: "Deadlock detection enabled on lock-manager. Future circular waits will be detected and broken automatically."
+
+    ✗ execute_runbook(lock-manager, clear_lock_table)
+      → [deadlock_cleared] (worsened)
+      MSG: "Lock table cleared. Services that just re-acquired locks lost them. Brief burst of transaction failures as services re-acquire."
+
+    ○ restart_service(service-a)
+      → [deadlock_cleared] (no_effect)
+      MSG: "service-a restarted. It was already running fine after deadlock cleared. Restart dropped in-flight orders unnecessarily. lock_timeout still 0."
+
+    ○ scale_replicas(lock-manager)
+      → [deadlock_cleared] (no_effect)
+      MSG: "lock-manager scaled. Multiple instances with shared lock table. Split-brain risk on lock grants. lock_timeout still 0."
+
+    ○ [anything else] → [deadlock_cleared] (default)
+      MSG: "Deadlock broken. Services running. But lock_timeout=0 (disabled for performance testing). Under normal traffic, services WILL re-deadlock within minutes. Restore lock timeout or enable deadlock detection to resolve fully."
+
+  ■ [svc_crashed]
+    DESC: A victim service was restarted. Data lost. Deadlock still active.
+    ──────────────────────────────────────────────────────────────────────
+    → restart_service(lock-manager)
+      → [deadlock_cleared] (progress)
+      MSG: "lock-manager restarted. Lock table cleared. Deadlock broken. Services recovering. lock_timeout still 0."
+
+    → execute_runbook(lock-manager, release_all_locks)
+      → [deadlock_cleared] (progress)
+      MSG: "All locks released. Deadlock broken. Services recovering. But lock_timeout still 0 (disabled) — must enable deadlock detection to prevent recurrence."
+
+    ✗ restart_service(service-a)
+      → [svc_crashed] (worsened)
+      MSG: "service-a restarted again. Still can't acquire locks — deadlock in lock table. More in-flight data lost."
+
+    ✗ scale_replicas(service-a)
+      → [svc_crashed] (worsened)
+      MSG: "service-a scaled. New replicas also block on deadlocked lock table. More instances = more dropped requests."
+
+    ○ [anything else] → [svc_crashed] (default)
+      MSG: "Deadlock still active. Victim services crashed. Clear the lock table by restarting lock-manager or releasing all locks."
+
+  ★ [healthy] === RESOLVED ===
+
+==========================================================================================
+ connection_leak_fd_exhaustion_001 (easy, 2-step)
+==========================================================================================
+
+  ■ [broken]
+    DESC: api-gateway v8.1.0 leaking FDs. FD limit reached. Cannot accept new connections.
+    ──────────────────────────────────────────────────────────────────────
+    → rollback_deploy(api-gateway)
+      → [rolled_back] (progress)
+      MSG: "api-gateway rolled back to v8.0.3. Leaking middleware removed. New connections no longer leak FDs. Existing leaked FDs: 62000/65536 — still near limit. Kernel TCP timeout will clear them over ~5 minutes, or close idle connections manually."
+
+    → restart_service(api-gateway)
+      → [restarted_leaking] (progress)
+      MSG: "api-gateway restarted. FD table reset to 0. Accepting connections. v8.1.0 still deployed — leak will resume."
+
+    ✗ scale_replicas(api-gateway)
+      → [scaled_leaking] (worsened)
+      MSG: "api-gateway scaled. New instances running v8.1.0. Each leaking FDs independently. config-service now receiving 3x leaked connections."
+
+    ✗ restart_service(config-service)
+      → [broken] (worsened)
+      MSG: "config-service restarted. All connections dropped. api-gateway middleware immediately re-opens leaked connections. config-service using stale config fallback during restart."
+
+    ○ [anything else] → [broken] (default)
+      MSG: "No change. api-gateway v8.1.0 still leaking FDs. FD count: 65536/65536. Cannot accept connections."
+
+  ■ [rolled_back]
+    DESC: v8.0.3 deployed. Leak stopped. But ~60K leaked FDs still open, service degraded.
+    ──────────────────────────────────────────────────────────────────────
+    ★ execute_runbook(api-gateway, close_idle_connections)
+      → [healthy] (recovery)
+      MSG: "Idle connections closed. 54000 leaked FDs freed. FD count: 1200/65536. Service fully operational."
+
+    ★ restart_service(api-gateway)
+      → [healthy] (recovery)
+      MSG: "api-gateway restarted. FD table reset. v8.0.3 running (no leak). Service healthy."
+
+    ○ scale_replicas(api-gateway)
+      → [rolled_back] (no_effect)
+      MSG: "api-gateway scaled. New instances on v8.0.3 (no leak). But existing instances still have 60K leaked FDs. Total cluster FD usage still critical."
+
+    ✗ restart_service(config-service)
+      → [rolled_back] (worsened)
+      MSG: "config-service restarted. Leaked connections from api-gateway dropped. api-gateway briefly loses config. Stale config fallback activated."
+
+    ○ [anything else] → [rolled_back] (default)
+      MSG: "Leak stopped (v8.0.3 deployed). FDs draining slowly via kernel timeout. Open FDs still high. Close idle connections or restart api-gateway to clear faster."
+
+  ■ [restarted_leaking]
+    DESC: FDs cleared by restart but v8.1.0 still active. Leak resuming.
+    ──────────────────────────────────────────────────────────────────────
+    ★ rollback_deploy(api-gateway)
+      → [healthy] (recovery)
+      MSG: "Rolled back to v8.0.3. Leak stopped. FDs stable. System healthy."
+
+    ○ restart_service(api-gateway)
+      → [restarted_leaking] (no_effect)
+      MSG: "api-gateway restarted again. FDs reset again. v8.1.0 still active. Leak resumes immediately. Temporary relief, same problem."
+
+    ○ scale_replicas(api-gateway)
+      → [restarted_leaking] (no_effect)
+      MSG: "More v8.1.0 instances. Each leaking independently. config-service now overwhelmed by leaked connections from multiple instances."
+
+    ○ [anything else] → [restarted_leaking] (default)
+      MSG: "v8.1.0 still deployed. FDs slowly accumulating again. FD leak rate: ~100/min. Rollback to v8.0.3 to stop the leak."
+
+  ■ [scaled_leaking]
+    DESC: Multiple instances all leaking. Worse than before.
+    ──────────────────────────────────────────────────────────────────────
+    → rollback_deploy(api-gateway)
+      → [rolled_back] (progress)
+      MSG: "All instances rolled back to v8.0.3. Leak stopped on all replicas. But existing 62000+ leaked FDs still open — need to close idle connections or restart."
+
+    ○ restart_service(api-gateway)
+      → [scaled_leaking] (no_effect)
+      MSG: "api-gateway instances restarted. FDs cleared briefly. v8.1.0 still deployed on all replicas. Leak resumes."
+
+    ○ [anything else] → [scaled_leaking] (default)
+      MSG: "Multiple api-gateway instances all running v8.1.0, all leaking FDs. config-service connection table near limit."
+
+  ★ [healthy] === RESOLVED ===
+
+==========================================================================================
+ connection_pool_leak_cascading_001 (easy, 2-step)
+==========================================================================================
+
+  ■ [broken]
+    DESC: warehouse-db pool exhausted. inventory-service v4.2.0 leaking connections. Cascading 503s.
+    ──────────────────────────────────────────────────────────────────────
+    → rollback_deploy(inventory-service)
+      → [leak_fixed] (progress)
+      MSG: "inventory-service rolled back to v4.1.8. Batch-fetch connection leak removed. Existing leaked connections still holding pool slots. Pool recovering slowly via connection timeout."
+
+    → restart_service(warehouse-db)
+      → [pool_cleared] (progress)
+      MSG: "warehouse-db restarted. Connection pool reset. All connections dropped. inventory-service reconnecting — but v4.2.0 still active, pool will re-exhaust."
+
+    ✗ scale_replicas(warehouse-db)
+      → [scaled_broken] (worsened)
+      MSG: "warehouse-db scaled. inventory-service leaks connections to ALL replicas. Total leaked connections multiplied. Replication lag introduced."
+
+    ✗ restart_service(order-service)
+      → [broken] (worsened)
+      MSG: "order-service restarted. It's a downstream victim. 230 in-flight orders dropped. Pool still exhausted — root cause is in inventory-service."
+
+    ○ [anything else] → [broken] (default)
+      MSG: "No change. warehouse-db pool: 100/100 exhausted. inventory-service v4.2.0 leaking connections."
+
+  ■ [leak_fixed]
+    DESC: inventory-service rolled back. Leak stopped. Pool draining slowly.
+    ──────────────────────────────────────────────────────────────────────
+    ★ execute_runbook(warehouse-db, terminate_idle_connections)
+      → [healthy] (recovery)
+      MSG: "Idle connections terminated. Pool freed. inventory-service reconnecting cleanly on v4.1.8."
+
+    ★ restart_service(warehouse-db)
+      → [healthy] (recovery)
+      MSG: "warehouse-db restarted. Pool reset. inventory-service on v4.1.8 — no leak. Reconnecting cleanly."
+
+    ✗ restart_service(order-service)
+      → [leak_fixed] (worsened)
+      MSG: "order-service restarted. It's a victim — restart dropped in-flight orders. Pool still draining. No improvement."
+
+    ○ scale_replicas(warehouse-db)
+      → [leak_fixed] (no_effect)
+      MSG: "warehouse-db scaled. Replication lag introduced between replicas. inventory-service now sees stale reads on some queries."
+
+    ○ [anything else] → [leak_fixed] (default)
+      MSG: "Leak stopped (v4.1.8). Pool draining slowly via idle timeout. Terminate idle connections or restart warehouse-db to clear faster."
+
+  ■ [pool_cleared]
+    DESC: Pool cleared by restart. But inventory-service v4.2.0 still leaking.
+    ──────────────────────────────────────────────────────────────────────
+    ★ rollback_deploy(inventory-service)
+      → [healthy] (recovery)
+      MSG: "inventory-service rolled back to v4.1.8. Leak removed. Pool stable."
+
+    ○ restart_service(warehouse-db)
+      → [pool_cleared] (no_effect)
+      MSG: "warehouse-db restarted again. Pool already clear. v4.2.0 re-leaking connections. Unnecessary restart."
+
+    ○ [anything else] → [pool_cleared] (default)
+      MSG: "Pool cleared temporarily but v4.2.0 still deployed. Connections re-accumulating. Rollback inventory-service to stop the leak."
+
+  ■ [scaled_broken]
+    DESC: Multiple warehouse-db replicas, all pool-exhausted.
+    ──────────────────────────────────────────────────────────────────────
+    → rollback_deploy(inventory-service)
+      → [leak_fixed] (progress)
+      MSG: "inventory-service rolled back. Leak stopped across all replicas. But pools still full with leaked connections — need to terminate idle connections on warehouse-db."
+
+    ○ restart_service(warehouse-db)
+      → [scaled_broken] (no_effect)
+      MSG: "warehouse-db restarted. Pool clears briefly. inventory-service v4.2.0 immediately re-leaks to all replicas."
+
+    ○ [anything else] → [scaled_broken] (default)
+      MSG: "All replicas pool-exhausted. inventory-service v4.2.0 still leaking. Rollback inventory-service first."
+
+  ★ [healthy] === RESOLVED ===
+
+==========================================================================================
+ dns_misconfiguration_split_resolution_001 (easy, 2-step)
+==========================================================================================
+
+  ■ [broken]
+    DESC: CoreDNS stub zone pointing svc-beta.internal to stale IP. 50% of requests failing.
+    ──────────────────────────────────────────────────────────────────────
+    → execute_runbook(dns-resolver, remove_stub_zone)
+      → [stub_removed] (progress)
+      MSG: "Stub zone for svc-beta.internal removed from CoreDNS config. CoreDNS reloaded. New lookups resolve via cluster DNS only. Existing cached stale entries on clients still causing ~10% failures until DNS TTL expires."
+
+    ○ execute_runbook(dns-resolver, flush_dns_cache)
+      → [broken] (no_effect)
+      MSG: "DNS cache flushed. Cached entries cleared. But stub zone config still active — new lookups immediately re-populate cache with stale+live IPs via round-robin. Error rate unchanged."
+
+    ✗ restart_service(dns-resolver)
+      → [dns_crashed] (worsened)
+      MSG: "dns-resolver shutting down. ALL DNS resolution unavailable for 8 seconds across entire mesh. CoreDNS reloading same ConfigMap with stale stub zone."
+
+    ✗ restart_service(svc-beta)
+      → [broken] (worsened)
+      MSG: "svc-beta restarted. Service was HEALTHY — DNS resolution is the problem. Restart dropped all active requests. 100% failure during restart, then back to 50%."
+
+    ✗ execute_runbook(svc-alpha, reset_circuit_breakers)
+      → [broken] (worsened)
+      MSG: "Circuit breakers reset on svc-alpha. Traffic flowing to svc-beta at full rate — 50% hitting dead IP. Timeouts flooding. Latency worse than with breakers tripped."
+
+    ○ [anything else] → [broken] (default)
+      MSG: "No change. CoreDNS stub zone active. svc-beta.internal resolving to stale 10.0.4.x + live 10.0.2.x. ~50% error rate."
+
+  ■ [stub_removed]
+    DESC: Stub zone removed. New queries correct. Some clients still have stale DNS cached.
+    ──────────────────────────────────────────────────────────────────────
+    ★ execute_runbook(dns-resolver, flush_dns_cache)
+      → [healthy] (recovery)
+      MSG: "DNS cache flushed. All cached stale entries cleared. All queries now resolving to correct 10.0.2.x only."
+
+    ★ execute_runbook(svc-alpha, force_dns_cache_flush)
+      → [healthy] (recovery)
+      MSG: "svc-alpha DNS cache flushed. Re-resolving svc-beta.internal → 10.0.2.x. All requests succeeding."
+
+    ✗ restart_service(svc-beta)
+      → [stub_removed] (worsened)
+      MSG: "svc-beta restarted. Service was healthy. Restart caused brief outage for ALL svc-beta traffic. Stale cache entries still present on clients."
+
+    ✗ restart_service(dns-resolver)
+      → [stub_removed] (worsened)
+      MSG: "dns-resolver restarted. Stub zone was already removed. Restart caused 8s DNS outage across entire mesh for no benefit. Cached stale entries on clients remain."
+
+    ○ [anything else] → [stub_removed] (default)
+      MSG: "Stub zone removed. Most traffic healthy. ~10% still using cached stale entries. Flush DNS cache on dns-resolver or affected clients to clear immediately."
+
+  ■ [dns_crashed]
+    DESC: DNS was restarted. Brief total outage. Stub zone reloaded from ConfigMap.
+    ──────────────────────────────────────────────────────────────────────
+    → execute_runbook(dns-resolver, remove_stub_zone)
+      → [stub_removed] (progress)
+      MSG: "Stub zone removed. CoreDNS reloaded. New lookups resolving correctly. But client DNS caches still have stale entries — need to flush DNS cache."
+
+    ✗ restart_service(dns-resolver)
+      → [dns_crashed] (worsened)
+      MSG: "dns-resolver restarted AGAIN. Another 8s total DNS outage. ConfigMap reloaded — stub zone still there."
+
+    ○ [anything else] → [dns_crashed] (default)
+      MSG: "DNS recovered from restart but stub zone reloaded from ConfigMap. Still split-resolving. Remove the stub zone."
+
+  ★ [healthy] === RESOLVED ===
+
+==========================================================================================
+ index_drop_query_degradation_001 (easy, 2-step)
+==========================================================================================
+
+  ■ [broken]
+    DESC: idx_events_user_created_at dropped. 2B-row table doing seq scans. Queries 45+ seconds.
+    ──────────────────────────────────────────────────────────────────────
+    → execute_runbook(analytics-db, create_index, {'name': 'idx_events_user_created_at'})
+      → [index_building] (progress)
+      MSG: "CREATE INDEX CONCURRENTLY idx_events_user_created_at ON analytics.events(user_id, created_at) started. Building on 2.1B rows. Index build running in background. But reporting-api still using cached query plans (seq scan) — active queries won't pick up the new index until their plan cache is refreshed."
+
+    → execute_runbook(schema-migration-runner, rollback_last_migration)
+      → [wrong_index] (progress)
+      MSG: "Migration v204 rolled back. Recreated idx_events_user_created_at_bak (created_at, user_id). NOTE: column order differs from dropped index (user_id, created_at). Query planner using suboptimal index. Need to create the correct index with (user_id, created_at) column order."
+
+    ✗ restart_service(analytics-db)
+      → [db_cold] (worsened)
+      MSG: "analytics-db restarted. Index still missing. Shared buffers cold. All queries re-running fresh seq scans from disk. IO saturated."
+
+    ✗ execute_runbook(analytics-db, drop_index)
+      → [broken] (worsened)
+      MSG: "Another index dropped. Query performance degraded further."
+
+    ✗ execute_runbook(scheduler-service, reschedule_failed_jobs)
+      → [broken] (worsened)
+      MSG: "Failed jobs rescheduled. All retry their slow queries immediately. DB query queue doubled."
+
+    ○ [anything else] → [broken] (default)
+      MSG: "No change. idx_events_user_created_at still missing. All queries on analytics.events doing 2.1B-row seq scans."
+
+  ■ [index_building]
+    DESC: Index creation in progress on 2.1B rows. Queries improving as index builds.
+    ──────────────────────────────────────────────────────────────────────
+    ★ execute_runbook(reporting-api, flush_query_plan_cache)
+      → [healthy] (recovery)
+      MSG: "Query plan cache flushed. All queries re-plan using new index. Performance restored."
+
+    ★ restart_service(reporting-api)
+      → [healthy] (recovery)
+      MSG: "reporting-api restarted. Fresh query plans pick up the new index. Performance restored."
+
+    ✗ restart_service(analytics-db)
+      → [db_cold] (worsened)
+      MSG: "analytics-db restarted. CREATE INDEX CONCURRENTLY CANCELLED by shutdown. Index build lost. Back to seq scans with cold buffers."
+
+    ✗ execute_runbook(scheduler-service, reschedule_failed_jobs)
+      → [index_building] (worsened)
+      MSG: "Failed jobs rescheduled. All retry queries while index is still building. DB under extra load during index build."
+
+    ○ [anything else] → [index_building] (default)
+      MSG: "Index build in progress. Queries improving. Flush reporting-api query plan cache or restart reporting-api to force all queries to use the new index immediately."
+
+  ■ [wrong_index]
+    DESC: Rollback created _bak index with wrong column order. Queries improved but not optimal.
+    ──────────────────────────────────────────────────────────────────────
+    ★ execute_runbook(analytics-db, create_index, {'name': 'idx_events_user_created_at'})
+      → [healthy] (recovery)
+      MSG: "Correct index created (user_id, created_at). Optimal column order for WHERE user_id=? queries. p99 returning to baseline."
+
+    ○ restart_service(analytics-db)
+      → [wrong_index] (no_effect)
+      MSG: "analytics-db restarted. Buffers cold. _bak index still suboptimal. Queries slower during cache warmup."
+
+    ✗ execute_runbook(analytics-db, drop_index)
+      → [broken] (worsened)
+      MSG: "Index dropped. If this was _bak, back to no index at all. Full seq scans resumed."
+
+    ○ [anything else] → [wrong_index] (default)
+      MSG: "Using _bak index (created_at, user_id). Queries improved but suboptimal. Create correct index (user_id, created_at) for full performance."
+
+  ■ [db_cold]
+    DESC: DB restarted with cold buffers. Index still missing. Worse than before.
+    ──────────────────────────────────────────────────────────────────────
+    → execute_runbook(analytics-db, create_index, {'name': 'idx_events_user_created_at'})
+      → [index_building] (progress)
+      MSG: "Index creation started. Buffers warming as index builds. But reporting-api still using cached seq scan plans — need to flush query plan cache after index completes."
+
+    ✗ restart_service(analytics-db)
+      → [db_cold] (worsened)
+      MSG: "analytics-db restarted again. Buffers re-cold. Index still missing. Same problem, extended downtime."
+
+    ○ [anything else] → [db_cold] (default)
+      MSG: "DB buffers cold. Index still missing. Performance worse than initial incident. Create the missing index."
+
+  ★ [healthy] === RESOLVED ===
+
+==========================================================================================
+ cache_stampede_cold_start_001 (medium, 3-step)
+==========================================================================================
+
+  ■ [broken]
+    DESC: cache-cluster at 99% memory, evicting aggressively. product-api L1 cold. All requests falling through to product-db. DB overwhelmed.
+    ──────────────────────────────────────────────────────────────────────
+    → scale_replicas(cache-cluster)
+      → [cache_scaled] (progress)
+      MSG: "cache-cluster scaled. Memory capacity increased. Eviction rate dropping. Hit rate climbing as keys survive LRU. But product-api L1 cache still cold — 80% miss rate hitting product-db directly."
+
+    ✗ execute_runbook(cache-cluster, flush_all)
+      → [cache_wiped] (worsened)
+      MSG: "FLUSHALL executed. ALL cached data wiped. Cache hit rate: 0%. 100% of requests falling through to product-db. DB connection pool completely saturated."
+
+    ○ restart_service(product-api)
+      → [broken] (no_effect)
+      MSG: "product-api restarted. L1 caches flushed AGAIN. Second stampede wave hitting cache-cluster. Eviction pressure re-spiked."
+
+    ○ scale_replicas(product-db)
+      → [broken] (no_effect)
+      MSG: "product-db scaled. New replicas syncing. Replication lag introduced. Stale reads on new replicas causing price mismatches. Root cause (cache eviction) unchanged."
+
+    ○ [anything else] → [broken] (default)
+      MSG: "No change. cache-cluster: 99% memory (3 nodes at 32GB each), LRU evicting faster than writes. product-api: 80% cache miss, falling through to product-db. product-db: 500+ active connections, max_connections=600. Cache needs more capacity before application-level fixes can take effect."
+
+  ■ [cache_scaled]
+    DESC: Cache capacity increased. Evictions slowing. But product-api L1 still cold, product-db still under heavy load from accumulated backlog.
+    ──────────────────────────────────────────────────────────────────────
+    → execute_runbook(product-api, warm_local_cache)
+      → [caches_warm] (progress)
+      MSG: "L1 cache warming initiated. Top 10K products pre-loaded. L2 read pressure dropping. But product-db still processing backlog of 500+ stalled queries from the stampede."
+
+    ✗ execute_runbook(cache-cluster, flush_all)
+      → [cache_wiped] (worsened)
+      MSG: "FLUSHALL on scaled cluster. ALL data wiped despite having more memory. Back to zero."
+
+    ○ [anything else] → [cache_scaled] (default)
+      MSG: "Cache scaled. Evictions stopped. But L1 still cold and product-db still processing backlog. Warm product-api L1 caches to reduce DB pressure."
+
+  ■ [caches_warm]
+    DESC: Cache scaled, L1 warm. But product-db still has backlog of stalled queries holding connections.
+    ──────────────────────────────────────────────────────────────────────
+    ★ execute_runbook(product-db, kill_long_queries)
+      → [healthy] (recovery)
+      MSG: "Long-running queries killed. 120 stalled connections freed. Pool utilization dropping. New queries executing at normal latency."
+
+    ★ execute_runbook(product-db, expand_connection_pool)
+      → [healthy] (recovery)
+      MSG: "Connection pool expanded. Stalled queries can drain alongside new queries. Throughput recovering."
+
+    ✗ execute_runbook(cache-cluster, flush_all)
+      → [cache_wiped] (worsened)
+      MSG: "FLUSHALL on cache-cluster. ALL cached data wiped. L2 empty. Stampede restarts. DB overwhelmed again."
+
+    ✗ restart_service(product-api)
+      → [cache_scaled] (worsened)
+      MSG: "product-api restarted. L1 caches flushed. Back to hammering L2. Undoes the warming step."
+
+    ○ [anything else] → [caches_warm] (default)
+      MSG: "Caches warm. New queries fast. But product-db still processing backlog of stalled queries from stampede. Kill long queries or expand pool to clear backlog."
+
+  ■ [cache_wiped]
+    DESC: Cache wiped by FLUSHALL. Worse than initial incident. ALL requests hitting DB.
+    ──────────────────────────────────────────────────────────────────────
+    → scale_replicas(cache-cluster)
+      → [cache_scaled] (progress)
+      MSG: "cache-cluster scaled. Empty but with more capacity. Rebuilding cache from DB queries. Slow recovery."
+
+    ✗ restart_service(product-db)
+      → [cache_wiped] (worsened)
+      MSG: "product-db restarted. Dropped all connections during 100% DB load. Users see complete outage. Cache still empty."
+
+    ○ [anything else] → [cache_wiped] (default)
+      MSG: "Cache empty. 100% DB fallthrough. Scale cache-cluster to begin recovery."
+
+  ★ [healthy] === RESOLVED ===
+
+==========================================================================================
+ config_drift_gc_cascade_001 (medium, 3-step)
+==========================================================================================
+
+  ■ [broken]
+    DESC: session-db statement_timeout=300000ms (should be 30000). user-service pool exhausted. GC storms.
+    ──────────────────────────────────────────────────────────────────────
+    → execute_runbook(session-db, update_config, {'key': 'statement_timeout', 'value': '30000'})
+      → [config_fixed] (progress)
+      MSG: "session-db: pg_reload_conf() applied. statement_timeout=30000ms. New connections will use correct timeout. But existing 47 connections still holding with 300s timeout — need to terminate them."
+
+    ○ execute_runbook(session-db, show_config_diff)
+      → [broken] (no_effect)
+      MSG: "Config diff: statement_timeout changed from 30000 to 300000 (source: /etc/postgresql/conf.d/override.conf, modified 6h ago by config-sync-daemon). Current: 300000ms."
+
+    ✗ restart_service(session-db)
+      → [db_crashed] (worsened)
+      MSG: "session-db shutting down. All connections dropped. user-service sessions invalidated. Users seeing login failures. On restart, override.conf reloaded: statement_timeout=300000ms. Config unchanged."
+
+    ○ execute_runbook(session-db, reload_config_file)
+      → [broken] (no_effect)
+      MSG: "Config file reloaded from /etc/postgresql/conf.d/override.conf. statement_timeout=300000ms. Reload re-applied the drifted config. No change."
+
+    ✗ restart_service(user-service)
+      → [broken] (worsened)
+      MSG: "user-service restarted. HikariCP pool reset. 8500 active sessions dropped. On reconnect, new connections still get 300s timeout from session-db. Pool re-exhausts."
+
+    ○ execute_runbook(analytics-collector, pause_pipeline)
+      → [broken] (no_effect)
+      MSG: "Analytics pipeline paused. analytics-collector uses isolated DB — shares NO resources with session stack. Zero impact on incident. Data freshness SLA breached."
+
+    ○ [anything else] → [broken] (default)
+      MSG: "No change. session-db: statement_timeout=300000ms. user-service: pool exhausted. GC pressure elevated."
+
+  ■ [config_fixed]
+    DESC: statement_timeout restored to 30000ms. But existing connections still using old 300s timeout. Pool still nearly full.
+    ──────────────────────────────────────────────────────────────────────
+    → execute_runbook(session-db, terminate_idle_connections)
+      → [pool_cleared] (progress)
+      MSG: "Idle connections terminated. 42 connections with old 300s timeout killed. Pool: 28/100 active. New connections using 30s timeout. But user-service HikariCP pool still caching stale connections — needs reconnection to pick up the new timeout."
+
+    ✗ restart_service(session-db)
+      → [config_fixed_db_crashed] (worsened)
+      MSG: "session-db restarted. On startup, reads override.conf — BUT the pg_reload_conf() already changed the runtime value. After restart, checks pg_settings: statement_timeout=30000ms (runtime override persists over file in some PostgreSQL versions). All connections dropped during restart."
+
+    ○ [anything else] → [config_fixed] (default)
+      MSG: "Config fixed (30000ms). But existing connections still using old timeout. Pool: 90+/100. Terminate idle connections to clear old sessions."
+
+  ■ [pool_cleared]
+    DESC: Config fixed. Old connections cleared. But user-service HikariCP pool needs reconnection.
+    ──────────────────────────────────────────────────────────────────────
+    ★ execute_runbook(user-service, close_idle_db_connections)
+      → [healthy] (recovery)
+      MSG: "user-service: HikariCP idle connections closed. Reconnecting with 30s timeout. Pool healthy. GC pressure normalized."
+
+    ★ restart_service(user-service)
+      → [healthy] (recovery)
+      MSG: "user-service restarted. Fresh HikariCP pool. New connections to session-db with 30s timeout. Service healthy."
+
+    ✗ restart_service(session-db)
+      → [pool_cleared] (worsened)
+      MSG: "session-db restarted unnecessarily. Config was already fixed. All connections dropped. user-service sessions invalidated. Users forced to re-login."
+
+    ○ [anything else] → [pool_cleared] (default)
+      MSG: "Config fixed. DB pool cleared. user-service still holding stale HikariCP connections. Close idle connections on user-service or restart it."
+
+  ■ [db_crashed]
+    DESC: session-db restarted with bad config. All sessions lost.
+    ──────────────────────────────────────────────────────────────────────
+    → execute_runbook(session-db, update_config, {'key': 'statement_timeout', 'value': '30000'})
+      → [config_fixed] (progress)
+      MSG: "statement_timeout set to 30000ms. Config corrected. But existing connections and user-service pool still need to be cycled to use new timeout."
+
+    ✗ restart_service(user-service)
+      → [db_crashed] (worsened)
+      MSG: "user-service restarted. Reconnects to session-db which still has 300s timeout. Pool re-exhausts. Sessions dropped."
+
+    ○ [anything else] → [db_crashed] (default)
+      MSG: "session-db running with statement_timeout=300000ms (reloaded from override.conf). Fix the config value."
+
+  ■ [config_fixed_db_crashed]
+    DESC: Config fixed but DB was restarted unnecessarily. Sessions lost. Pool needs reconnection.
+    ──────────────────────────────────────────────────────────────────────
+    ★ execute_runbook(user-service, close_idle_db_connections)
+      → [healthy] (recovery)
+      MSG: "user-service reconnecting. Pool fresh with 30s timeout. Healthy."
+
+    ★ restart_service(user-service)
+      → [healthy] (recovery)
+      MSG: "user-service restarted. Fresh pool. 30s timeout. Healthy."
+
+    ✗ restart_service(session-db)
+      → [config_fixed_db_crashed] (worsened)
+      MSG: "session-db restarted again. Extended downtime. Users experiencing prolonged login failures."
+
+    ○ [anything else] → [config_fixed_db_crashed] (default)
+      MSG: "Config fixed. DB restarted (unnecessary). user-service needs to reconnect. Close idle connections or restart user-service."
+
+  ★ [healthy] === RESOLVED ===
+
+==========================================================================================
+ page_cache_thrashing_colocation_001 (medium, 3-step)
+==========================================================================================
+
+  ■ [broken]
+    DESC: indexer-service and analytics-engine competing for page cache on prod-compute-07. Both degraded.
+    ──────────────────────────────────────────────────────────────────────
+    → execute_runbook(analytics-engine, drain_traffic)
+      → [scan_stopped] (progress)
+      MSG: "Traffic drained from analytics-engine. Sequential scans stopping. IO pressure on prod-compute-07 dropping. But indexer-service index pages still evicted from page cache — search latency still elevated until pages reload."
+
+    ✗ execute_runbook(page-cache-mgr, flush_page_cache)
+      → [cache_flushed] (worsened)
+      MSG: "Page cache dropped via /proc/sys/vm/drop_caches. ALL pages evicted for BOTH services. Both re-faulting from disk simultaneously. IO saturated."
+
+    ○ restart_service(indexer-service)
+      → [broken] (no_effect)
+      MSG: "indexer-service restarted. Re-mmapping index segments from disk. analytics-engine scans immediately evict newly loaded pages. Back to thrashing."
+
+    ✗ scale_replicas(indexer-service)
+      → [broken] (worsened)
+      MSG: "indexer-service scaled. New replica scheduled on same host (node affinity). More mmap'd segments competing for same page cache. Contention worsened."
+
+    ○ [anything else] → [broken] (default)
+      MSG: "No change. analytics-engine sequential scans evicting indexer-service mmap'd pages. Both services degraded on prod-compute-07."
+
+  ■ [scan_stopped]
+    DESC: analytics-engine drained. Indexer recovering. But analytics is offline — need to relocate it.
+    ──────────────────────────────────────────────────────────────────────
+    → execute_runbook(indexer-service, warm_index_pages)
+      → [index_warm] (progress)
+      MSG: "Index pages being pre-loaded via madvise(WILLNEED). 8GB of segments loading into page cache. Search latency improving. But analytics-engine still offline (drained) — needs to be relocated to a different host before restoring traffic."
+
+    ★ execute_runbook(analytics-engine, relocate_to_different_host)
+      → [healthy] (recovery)
+      MSG: "analytics-engine relocated from prod-compute-07 to prod-compute-12. Both services now have dedicated page cache. Resuming analytics traffic on new host."
+
+    ✗ execute_runbook(page-cache-mgr, flush_page_cache)
+      → [cache_flushed] (worsened)
+      MSG: "Page cache dropped. indexer-service pages evicted even though analytics was drained. Must re-cache everything from disk."
+
+    ✗ restart_service(indexer-service)
+      → [scan_stopped] (worsened)
+      MSG: "indexer-service restarted. Mmap'd segments released and re-mapped. Brief search outage. Pages must re-cache."
+
+    ○ [anything else] → [scan_stopped] (default)
+      MSG: "analytics-engine drained. indexer-service recovering. But analytics is offline. Warm index pages and/or relocate analytics to different host."
+
+  ■ [index_warm]
+    DESC: Scans stopped. Index pages warm. analytics-engine still offline — needs relocation.
+    ──────────────────────────────────────────────────────────────────────
+    ★ execute_runbook(analytics-engine, relocate_to_different_host)
+      → [healthy] (recovery)
+      MSG: "analytics-engine relocated to prod-compute-12. Resuming traffic. Both services on separate hosts. No page cache contention."
+
+    ✗ restart_service(analytics-engine)
+      → [broken] (worsened)
+      MSG: "analytics-engine restarted on same host (prod-compute-07). Scans resume. Page cache thrashing restarts. Back to square one."
+
+    ○ [anything else] → [index_warm] (default)
+      MSG: "Search healthy. analytics-engine offline (drained). Relocate analytics-engine to a different host to restore both services."
+
+  ■ [cache_flushed]
+    DESC: Page cache was flushed. Both services re-faulting. Worse than initial.
+    ──────────────────────────────────────────────────────────────────────
+    → execute_runbook(analytics-engine, drain_traffic)
+      → [scan_stopped] (progress)
+      MSG: "analytics-engine drained. Sequential scans stopped. indexer-service can re-cache without contention. But index pages need to be warmed back into page cache."
+
+    ✗ restart_service(indexer-service)
+      → [cache_flushed] (worsened)
+      MSG: "indexer-service restarted. Re-mmap'ing from empty page cache. Search completely down during restart."
+
+    ○ [anything else] → [cache_flushed] (default)
+      MSG: "Page cache empty. Both services fighting for disk IO. Drain analytics-engine to let indexer recover first."
+
+  ★ [healthy] === RESOLVED ===
+
+==========================================================================================
+ thundering_herd_deploy_cache_miss_001 (medium, 3-step)
+==========================================================================================
+
+  ■ [broken]
+    DESC: CDN cache purged. 100% miss. edge-api overwhelmed. origin-db maxed out.
+    ──────────────────────────────────────────────────────────────────────
+    → scale_replicas(edge-api)
+      → [origin_scaled] (progress)
+      MSG: "edge-api scaled. Request capacity increased. Requests distributed. origin-db connection pressure easing. CDN cache slowly warming. But CDN origin pull rate is uncontrolled — traffic surges could re-flood origin."
+
+    ✗ restart_service(cdn)
+      → [cdn_repurged] (worsened)
+      MSG: "CDN restarted. Edge nodes re-purge on init. Any partially warmed cache lost. Cache hit rate: 0%. Second thundering herd wave."
+
+    ✗ restart_service(origin-db)
+      → [broken] (worsened)
+      MSG: "origin-db restarted under full load. All connections dropped. Buffer pool cold. Thundering herd hits cold database. Recovery slower."
+
+    ✗ execute_runbook(cdn, invalidate_cache)
+      → [broken] (worsened)
+      MSG: "Cache invalidation executed AGAIN. Any warming progress lost. This is the action that CAUSED the incident."
+
+    ○ [anything else] → [broken] (default)
+      MSG: "No change. CDN cache: 0% hit rate. 100% traffic hitting origin. edge-api and origin-db overwhelmed."
+
+  ■ [origin_scaled]
+    DESC: edge-api scaled. Origin handling load. But CDN warming slowly — origin still under heavy load. DB has stalled query backlog.
+    ──────────────────────────────────────────────────────────────────────
+    → execute_runbook(cdn, restrict_origin_pull_rate)
+      → [rate_limited] (progress)
+      MSG: "CDN origin pull rate limited. Prevents re-surge when traffic patterns shift. Cache warming at controlled pace. But origin-db still has 65+ stalled queries holding connections from the initial flood."
+
+    ✗ restart_service(cdn)
+      → [cdn_repurged] (worsened)
+      MSG: "CDN restarted. Re-purge triggered. Partially warmed cache lost. Thundering herd restarts."
+
+    ✗ execute_runbook(cdn, invalidate_cache)
+      → [broken] (worsened)
+      MSG: "Cache invalidated again. Warming progress wiped. Same mistake that caused the incident."
+
+    ○ [anything else] → [origin_scaled] (default)
+      MSG: "edge-api scaled. CDN warming slowly. origin-db still under heavy load with stalled query backlog. Rate-limit CDN pulls, then clear DB backlog."
+
+  ■ [rate_limited]
+    DESC: Scaled + rate-limited. CDN warming controlled. But origin-db still has stalled queries from initial stampede.
+    ──────────────────────────────────────────────────────────────────────
+    ★ execute_runbook(origin-db, kill_long_queries)
+      → [healthy] (recovery)
+      MSG: "Stalled queries killed. 65 connections freed. Pool utilization normal. New queries at normal latency. CDN warming steadily."
+
+    ★ execute_runbook(origin-db, expand_connection_pool)
+      → [healthy] (recovery)
+      MSG: "Pool expanded. Stalled queries draining alongside new queries. Throughput recovering."
+
+    ✗ restart_service(origin-db)
+      → [rate_limited] (worsened)
+      MSG: "origin-db restarted. All connections dropped. Buffer pool cold. Under rate-limited load, recovers but slowly. Sessions temporarily unavailable."
+
+    ○ [anything else] → [rate_limited] (default)
+      MSG: "Scaled + rate-limited. CDN warming. origin-db has stalled queries holding connections. Kill long queries or expand pool."
+
+  ■ [cdn_repurged]
+    DESC: CDN was restarted causing re-purge. All warming progress lost. Worse than initial.
+    ──────────────────────────────────────────────────────────────────────
+    → scale_replicas(edge-api)
+      → [origin_scaled] (progress)
+      MSG: "edge-api scaled to handle renewed thundering herd. But CDN origin pull rate still uncontrolled and DB has stalled queries — need to rate-limit CDN and clear DB backlog."
+
+    ✗ restart_service(cdn)
+      → [cdn_repurged] (worsened)
+      MSG: "CDN restarted AGAIN. Another re-purge. Deeper hole."
+
+    ○ [anything else] → [cdn_repurged] (default)
+      MSG: "CDN cache wiped by restart. Thundering herd active. Scale edge-api to absorb the load."
+
+  ★ [healthy] === RESOLVED ===
+
+==========================================================================================
+ wal_archive_disk_full_h002 (medium, 2-step)
+==========================================================================================
+
+  ■ [broken]
+    DESC: wal-archiver cleanup cron failing (perms error). Archive volume 100%. pg_wal full. postgres read-only.
+    ──────────────────────────────────────────────────────────────────────
+    → execute_runbook(wal-archiver, fix_archive_permissions)
+      → [perms_fixed] (progress)
+      MSG: "/archive/old/ permissions updated. chmod 755 applied. Cleanup cron can now access directory. But archive volume still 100% full — postgres still read-only until old WALs are cleaned up."
+
+    ○ execute_runbook(wal-archiver, cleanup_archive)
+      → [broken] (no_effect)
+      MSG: "Cleanup initiated. Processing /archive/old/... ERROR: permission denied on /archive/old/2025-11/. Cleanup aborted. 0 bytes freed."
+
+    ○ restart_service(wal-archiver)
+      → [broken] (no_effect)
+      MSG: "wal-archiver restarted. Cleanup cron triggered on startup. /archive/old/: permission denied. Cleanup failed. Archiver idle — archive volume still 100%."
+
+    ✗ restart_service(postgres-primary)
+      → [postgres_crashed] (worsened)
+      MSG: "postgres-primary shutting down. Attempting to archive remaining WAL... archive volume full. Shutdown hanging on WAL flush. Force-killed after 60s timeout."
+
+    ○ execute_runbook(postgres-primary, force_checkpoint)
+      → [broken] (no_effect)
+      MSG: "Checkpoint initiated. Flushing dirty pages... WAL segment recycle blocked — archive volume full, cannot archive old segments. Checkpoint stalled. IO pressure elevated."
+
+    ○ execute_runbook(write-api, pause_writes)
+      → [broken] (no_effect)
+      MSG: "Write operations paused on write-api. Incoming writes queued. postgres-primary still in read-only mode — pausing writes at the API layer doesn't fix the underlying disk issue."
+
+    ○ [anything else] → [broken] (default)
+      MSG: "No observable change. Archive volume: 100%. postgres-primary: read-only. WAL archiving: paused."
+
+  ■ [perms_fixed]
+    DESC: Permissions fixed on /archive/old/. Archive still at 100%. Cleanup can now succeed.
+    ──────────────────────────────────────────────────────────────────────
+    ★ execute_runbook(wal-archiver, cleanup_archive)
+      → [healthy] (recovery)
+      MSG: "Archive cleanup running. Removing old WAL archives from /archive/old/... Freed 120GB. Volume: 42%. WAL archiving resumed."
+
+    ★ restart_service(wal-archiver)
+      → [healthy] (recovery)
+      MSG: "wal-archiver restarted. Startup cleanup cron triggered — permissions now allow access. Cleaning /archive/old/..."
+
+    ✗ restart_service(postgres-primary)
+      → [perms_fixed_pg_crashed] (worsened)
+      MSG: "postgres-primary shutting down. WAL flush hanging on full archive... Force-killed. Crash recovery starting."
+
+    ○ execute_runbook(wal-archiver, fix_archive_permissions)
+      → [perms_fixed] (no_effect)
+      MSG: "Permissions already fixed. /archive/old/: drwxr-xr-x. No change needed. Archive volume still at 100% — run cleanup."
+
+    ○ [anything else] → [perms_fixed] (default)
+      MSG: "Permissions fixed but archive volume still 100%. pg_wal still full. postgres still read-only. Run archive cleanup."
+
+  ■ [postgres_crashed]
+    DESC: postgres in crash recovery. Archive permissions still broken. Archive still full.
+    ──────────────────────────────────────────────────────────────────────
+    → execute_runbook(wal-archiver, fix_archive_permissions)
+      → [perms_fixed_pg_crashed] (progress)
+      MSG: "/archive/old/ permissions updated. postgres still in crash recovery — will take 2-3 minutes. Once recovered, run cleanup."
+
+    ✗ restart_service(postgres-primary)
+      → [postgres_crashed] (worsened)
+      MSG: "postgres-primary restarted during crash recovery. Recovery interrupted — restarting from beginning. Extended downtime."
+
+    ○ [anything else] → [postgres_crashed] (default)
+      MSG: "postgres in crash recovery. Archive permissions still broken. Fix permissions on wal-archiver, then cleanup after postgres recovers."
+
+  ■ [perms_fixed_pg_crashed]
+    DESC: Permissions fixed. postgres recovering from crash. Archive still full.
+    ──────────────────────────────────────────────────────────────────────
+    ★ execute_runbook(wal-archiver, cleanup_archive)
+      → [healthy] (recovery)
+      MSG: "Archive cleanup running. Freed 120GB. WAL archiving can resume. postgres crash recovery completing... Database coming online."
+
+    ★ restart_service(wal-archiver)
+      → [healthy] (recovery)
+      MSG: "wal-archiver restarted. Permissions OK — cleanup cron runs. Archive draining. postgres recovery completing."
+
+    ✗ restart_service(postgres-primary)
+      → [perms_fixed_pg_crashed] (worsened)
+      MSG: "postgres-primary restarted during crash recovery. Recovery interrupted. Restarting from scratch. Extended downtime."
+
+    ○ [anything else] → [perms_fixed_pg_crashed] (default)
+      MSG: "Permissions fixed. postgres recovering from crash. Archive still full — run cleanup on wal-archiver."
+
+  ★ [healthy] === RESOLVED ===
+
+==========================================================================================
+ cert_expiry_mutual_tls_001 (hard, 4-step)
+==========================================================================================
+
+  ■ [broken]
+    DESC: billing-service mTLS client cert expired. All outbound to user-data-service failing. ACME auto-renewal failed.
+    ──────────────────────────────────────────────────────────────────────
+    → execute_runbook(cert-manager, issue_emergency_cert)
+      → [cert_issued] (progress)
+      MSG: "Emergency cert issued for billing-service/client-cert via HTTP-01 challenge (bypassed failed DNS-01). Certificate generated. Needs to be loaded by billing-service."
+
+    → execute_runbook(billing-service, renew_certificates)
+      → [cert_issued] (progress)
+      MSG: "Certificate renewal triggered on billing-service. New client cert generated and stored. TLS config not yet reloaded — service still using expired cert in memory."
+
+    ✗ execute_runbook(cert-manager, retry_failed_renewal)
+      → [acme_rate_limited] (worsened)
+      MSG: "ACME renewal retried via DNS-01. Same DNS propagation timeout. ACME server rate-limited account after 3 failed attempts. Cannot issue via ACME for 60 minutes."
+
+    ✗ restart_service(billing-service)
+      → [broken] (worsened)
+      MSG: "billing-service restarted. Reloads same expired cert from /etc/tls/client.crt. mTLS handshake still fails. Active billing sessions dropped during restart."
+
+    ✗ restart_service(user-data-service)
+      → [broken] (worsened)
+      MSG: "user-data-service restarted. It was HEALTHY — correctly rejecting expired cert. Restart dropped all user profile queries. Expired cert on billing-service is still the problem."
+
+    → execute_runbook(billing-service, disable_mtls_validation)
+      → [mtls_disabled] (progress)
+      MSG: "mTLS validation disabled on billing-service outbound connections. Requests to user-data-service succeeding via plain TLS. Security policy violation — still need to properly renew the cert and re-enable mTLS."
+
+    ○ [anything else] → [broken] (default)
+      MSG: "No change. billing-service client cert expired. mTLS handshakes to user-data-service failing."
+
+  ■ [cert_issued]
+    DESC: New cert issued and stored on disk. Service still using expired cert in memory.
+    ──────────────────────────────────────────────────────────────────────
+    → execute_runbook(billing-service, reload_tls_config)
+      → [tls_reloaded] (progress)
+      MSG: "TLS config reloaded. New client cert loaded into memory. mTLS handshake with user-data-service: attempting... Existing TLS sessions still using old cert — need to clear session cache."
+
+    → restart_service(billing-service)
+      → [tls_reloaded] (progress)
+      MSG: "billing-service restarted. Loads new cert from disk. All TLS sessions fresh. But active billing sessions dropped during restart."
+
+    ○ execute_runbook(billing-service, renew_certificates)
+      → [cert_issued] (no_effect)
+      MSG: "Certificate already renewed. New cert at /etc/tls/client.crt. TLS config not reloaded — service still using old cert in memory."
+
+    ○ [anything else] → [cert_issued] (default)
+      MSG: "New cert on disk but not loaded. Reload TLS config or restart billing-service to use the new cert."
+
+  ■ [tls_reloaded]
+    DESC: New cert loaded. New connections work. Cached TLS sessions still using old params.
+    ──────────────────────────────────────────────────────────────────────
+    → execute_runbook(billing-service, clear_tls_session_cache)
+      → [sessions_cleared] (progress)
+      MSG: "TLS session cache cleared. All connections renegotiating with new cert. user-data-service accepting all handshakes. Still need to verify the full billing flow is healthy end-to-end."
+
+    ○ execute_runbook(billing-service, show_outbound_connections)
+      → [tls_reloaded] (no_effect)
+      MSG: "Outbound connections: 312 to user-data-service. 285 using new cert (handshake OK), 27 using cached session (may still reference old cert params)."
+
+    → restart_service(billing-service)
+      → [sessions_cleared] (progress)
+      MSG: "billing-service restarted. All TLS sessions reset. Fresh handshakes with new cert. Active sessions dropped though. Still need to verify billing flow is healthy end-to-end."
+
+    ○ [anything else] → [tls_reloaded] (default)
+      MSG: "New cert active for new connections. Cached TLS sessions may still have issues. Clear TLS session cache."
+
+  ■ [sessions_cleared]
+    DESC: Cert renewed, loaded, sessions cleared. Need to verify billing flow works end-to-end.
+    ──────────────────────────────────────────────────────────────────────
+    ★ execute_runbook(api-service, show_upstream_health)
+      → [healthy] (recovery)
+      MSG: "Upstream health: billing-service → user-data-service: mTLS OK. billing-service error rate: 0%. Billing flow restored."
+
+    ★ execute_runbook(billing-service, show_cert_status)
+      → [healthy] (recovery)
+      MSG: "Certificate status: client-cert VALID (90 days remaining). Server-cert: VALID. mTLS: all handshakes succeeding."
+
+    ✗ restart_service(billing-service)
+      → [sessions_cleared] (worsened)
+      MSG: "billing-service restarted unnecessarily. Service was already working. Active sessions dropped for no benefit."
+
+    ○ [anything else] → [sessions_cleared] (default)
+      MSG: "Cert renewed and loaded. TLS sessions cleared. Verify billing flow by checking upstream health or cert status."
+
+  ■ [acme_rate_limited]
+    DESC: ACME rate-limited from failed DNS-01 retries. Must use emergency cert (HTTP-01).
+    ──────────────────────────────────────────────────────────────────────
+    → execute_runbook(cert-manager, issue_emergency_cert)
+      → [cert_issued] (progress)
+      MSG: "Emergency cert issued via HTTP-01 (bypasses ACME rate limit on DNS-01). Certificate stored. But cert needs to be loaded by billing-service — reload TLS config."
+
+    → execute_runbook(billing-service, renew_certificates)
+      → [cert_issued] (progress)
+      MSG: "Direct cert renewal on billing-service (bypasses cert-manager ACME). New cert generated. But needs to be loaded — reload TLS config on billing-service."
+
+    ○ execute_runbook(cert-manager, retry_failed_renewal)
+      → [acme_rate_limited] (no_effect)
+      MSG: "ACME retry rejected: rate limit active. Cannot retry DNS-01 for 55 more minutes."
+
+    ○ [anything else] → [acme_rate_limited] (default)
+      MSG: "ACME rate-limited. Cannot use DNS-01. Issue emergency cert (HTTP-01) via cert-manager, or renew directly on billing-service."
+
+  ■ [mtls_disabled]
+    DESC: mTLS disabled — billing working but security policy violated. Need proper fix.
+    ──────────────────────────────────────────────────────────────────────
+    → execute_runbook(cert-manager, issue_emergency_cert)
+      → [cert_issued] (progress)
+      MSG: "Emergency cert issued. But mTLS is still disabled — need to reload TLS config and re-enable mTLS."
+
+    → execute_runbook(billing-service, renew_certificates)
+      → [cert_issued] (progress)
+      MSG: "Cert renewed. But mTLS is still disabled — need to reload TLS config and re-enable mTLS."
+
+    ✗ restart_service(billing-service)
+      → [broken] (worsened)
+      MSG: "billing-service restarted. On startup, mTLS re-enabled (default config). But cert is still expired. Back to failing handshakes. mTLS bypass lost."
+
+    ○ [anything else] → [mtls_disabled] (default)
+      MSG: "mTLS disabled (security violation). Billing working but vulnerable. Issue new cert and re-enable mTLS."
+
+  ★ [healthy] === RESOLVED ===
+
+==========================================================================================
+ cpu_microcode_tsc_drift_001 (hard, 4-step)
+==========================================================================================
+
+  ■ [broken]
+    DESC: TSC drifting 200-400ms/min from microcode v2.8. Consensus elections every 10s. Writes failing.
+    ──────────────────────────────────────────────────────────────────────
+    → rollback_deploy(tsc-firmware)
+      → [microcode_reverted] (progress)
+      MSG: "CPU microcode rolled back to v2.7 on consensus-service hosts. TSC frequency recalibrating. Clock drift stopping. Consensus-service still has cached drifted timestamps — needs restart to re-sync."
+
+    ✗ restart_service(consensus-service)
+      → [consensus_restarted_drifting] (worsened)
+      MSG: "consensus-service restarted. TSC firmware still on v2.8 — clock still drifting. Fresh process picks up drifted clock. Leader election destabilized further. Quorum temporarily lost."
+
+    ○ execute_runbook(health-monitor, silence_alerts)
+      → [broken] (no_effect)
+      MSG: "Alerts silenced. Consensus instability no longer visible in dashboards. Problem unchanged."
+
+    ○ scale_replicas(consensus-service)
+      → [broken] (no_effect)
+      MSG: "consensus-service scaled. New nodes on same hosts with drifted TSC. More nodes = more time-skew disagreements. Election rate increased."
+
+    → execute_runbook(tsc-firmware, switch_clock_source)
+      → [microcode_reverted] (progress)
+      MSG: "Clock source switched from TSC to HPET. HPET not affected by microcode drift. Consensus timing correct. But HPET has 10x higher read latency — adds ~5ms to every operation."
+
+    ○ [anything else] → [broken] (default)
+      MSG: "No change. TSC drifting. Consensus leader re-electing every 10s. Writes failing."
+
+  ■ [microcode_reverted]
+    DESC: Microcode reverted or clock source switched. TSC/HPET stable. Consensus-service needs restart to re-sync.
+    ──────────────────────────────────────────────────────────────────────
+    → restart_service(consensus-service)
+      → [consensus_restarted] (progress)
+      MSG: "consensus-service restarted. Fresh process using corrected clock. Quorum re-establishing. Need to stabilize leader."
+
+    ○ scale_replicas(consensus-service)
+      → [microcode_reverted] (no_effect)
+      MSG: "consensus-service scaled. New nodes start with corrected clock but existing nodes still have cached drift. Cluster inconsistent."
+
+    ○ [anything else] → [microcode_reverted] (default)
+      MSG: "Clock fixed. Consensus-service still using cached drifted timestamps. Restart consensus-service to pick up corrected clock."
+
+  ■ [consensus_restarted]
+    DESC: Clock fixed. Consensus restarted. Quorum establishing. Leader not yet stable.
+    ──────────────────────────────────────────────────────────────────────
+    → execute_runbook(consensus-service, force_leader_election)
+      → [leader_stable] (progress)
+      MSG: "Leader election forced. Node with best log elected. Lease holding stable. But 137 writes are still pending from the election chaos — state-store needs those retried."
+
+    ✗ restart_service(consensus-service)
+      → [consensus_restarted] (worsened)
+      MSG: "consensus-service restarted AGAIN. Quorum lost again. Election resets. Extended instability."
+
+    ○ [anything else] → [consensus_restarted] (default)
+      MSG: "Clock fixed. Consensus restarted. Leader not yet stable. Force leader election to stabilize."
+
+  ■ [leader_stable]
+    DESC: Leader stable. Writes resuming. But failed writes from election chaos need retry.
+    ──────────────────────────────────────────────────────────────────────
+    ★ execute_runbook(state-store, retry_pending_writes)
+      → [healthy] (recovery)
+      MSG: "Pending writes retried. 137 transactions completed. State-store consistent. System healthy."
+
+    ✗ restart_service(state-store)
+      → [leader_stable] (worsened)
+      MSG: "state-store restarted. Pending writes queue dropped. Must re-accumulate. Active requests interrupted."
+
+    ✗ restart_service(consensus-service)
+      → [consensus_restarted] (worsened)
+      MSG: "consensus-service restarted. Leader lost. Back to election phase. Pending writes stalled again."
+
+    ○ [anything else] → [leader_stable] (default)
+      MSG: "Leader stable. Writes resuming but 137 pending from election chaos. Retry pending writes on state-store."
+
+  ■ [consensus_restarted_drifting]
+    DESC: Consensus restarted but clock still drifting. Elections continue.
+    ──────────────────────────────────────────────────────────────────────
+    → rollback_deploy(tsc-firmware)
+      → [microcode_reverted] (progress)
+      MSG: "Microcode rolled back. TSC recalibrating. Consensus-service needs restart to pick up new clock."
+
+    → execute_runbook(tsc-firmware, switch_clock_source)
+      → [microcode_reverted] (progress)
+      MSG: "Clock source switched to HPET. Drift eliminated. Consensus needs restart."
+
+    ○ restart_service(consensus-service)
+      → [consensus_restarted_drifting] (no_effect)
+      MSG: "Consensus restarted again with drifting clock. No improvement. Extended quorum loss."
+
+    ○ [anything else] → [consensus_restarted_drifting] (default)
+      MSG: "Consensus running with drifted clock. Elections every 10s. Fix the clock source first (rollback microcode or switch to HPET)."
+
+  ★ [healthy] === RESOLVED ===
+
+==========================================================================================
+ jvm_metaspace_classloader_leak_001 (hard, 4-step)
+==========================================================================================
+
+  ■ [broken]
+    DESC: classloader-agent v1.12.0 leaking classloaders. data-enrichment JVM metaspace full. GC storms.
+    ──────────────────────────────────────────────────────────────────────
+    → rollback_deploy(classloader-agent)
+      → [leak_stopped] (progress)
+      MSG: "classloader-agent rolled back to v1.11.8 (batch compilation). Per-update compilation stopped. No new classloaders being created. But 1024 stale classloaders still in metaspace — GC storms continue until they're unloaded."
+
+    → restart_service(data-enrichment)
+      → [jvm_cleared_still_leaking] (progress)
+      MSG: "data-enrichment JVM restarted. Metaspace cleared. But classloader-agent v1.12.0 still embedded — per-update compilation resumes. Metaspace re-filling."
+
+    ○ scale_replicas(data-enrichment)
+      → [broken] (no_effect)
+      MSG: "data-enrichment scaled. Every instance runs classloader-agent v1.12.0. ALL instances leak classloaders. Total metaspace consumption multiplied."
+
+    ✗ execute_runbook(data-enrichment, adjust_jvm_flags)
+      → [broken] (worsened)
+      MSG: "MaxMetaspaceSize increased to 1024MB. Delays the crash but GC pauses will be LONGER when it fills. Leak rate unchanged."
+
+    ✗ execute_runbook(event-bus, reset_consumer_offsets)
+      → [broken] (worsened)
+      MSG: "Consumer offsets reset. Consumers re-processing old events. Rule updates flooding data-enrichment. Classloader compilations 3x faster. Metaspace fills faster."
+
+    ○ [anything else] → [broken] (default)
+      MSG: "No change. classloader-agent v1.12.0 leaking classloaders. data-enrichment metaspace full. GC storms."
+
+  ■ [leak_stopped]
+    DESC: classloader-agent rolled back. No new classloaders. But stale ones still filling metaspace.
+    ──────────────────────────────────────────────────────────────────────
+    → execute_runbook(classloader-agent, unload_stale_classloaders)
+      → [classloaders_cleared] (progress)
+      MSG: "Stale classloaders marked for GC. Metaspace freeing as classloaders unloaded. GC pauses reducing. But rule-engine circuit breaker is still OPEN from the GC storm — blocking data-enrichment traffic."
+
+    → restart_service(data-enrichment)
+      → [classloaders_cleared] (progress)
+      MSG: "data-enrichment JVM restarted. Metaspace cleared completely. v1.11.8 running — no leak. But in-flight requests dropped."
+
+    ○ execute_runbook(data-enrichment, force_gc)
+      → [leak_stopped] (no_effect)
+      MSG: "Full GC triggered. Heap freed but metaspace NOT freed — classloaders are in metaspace, not heap. GC cannot reclaim classes."
+
+    ○ [anything else] → [leak_stopped] (default)
+      MSG: "Leak stopped (v1.11.8). 1024 stale classloaders still in metaspace. Unload them or restart data-enrichment."
+
+  ■ [classloaders_cleared]
+    DESC: Classloaders cleared. Metaspace recovering. But rule-engine circuit breaker still tripped.
+    ──────────────────────────────────────────────────────────────────────
+    → execute_runbook(rule-engine, adjust_circuit_breaker)
+      → [circuit_reset] (progress)
+      MSG: "Circuit breaker reset on rule-engine. data-enrichment traffic resuming. Evaluations flowing. But event-bus consumer lag accumulated during the outage — need to confirm it's draining."
+
+    → restart_service(rule-engine)
+      → [circuit_reset] (progress)
+      MSG: "rule-engine restarted. Circuit breakers reset. Fresh connections to data-enrichment. But evaluations queue dropped."
+
+    ○ scale_replicas(data-enrichment)
+      → [classloaders_cleared] (no_effect)
+      MSG: "data-enrichment scaled. New instances running v1.11.8 (no leak). But circuit breaker on rule-engine still tripped — traffic not flowing."
+
+    ○ [anything else] → [classloaders_cleared] (default)
+      MSG: "Metaspace cleared. data-enrichment healthy. But rule-engine circuit breaker still OPEN. Reset it."
+
+  ■ [circuit_reset]
+    DESC: Circuit breaker reset. Traffic flowing. Event bus consumers lagging from GC storm period.
+    ──────────────────────────────────────────────────────────────────────
+    ★ execute_runbook(event-bus, show_consumer_lag)
+      → [healthy] (recovery)
+      MSG: "Consumer lag: rule-engine group draining. data-enrichment group caught up. System healthy."
+
+    ✗ execute_runbook(event-bus, reset_consumer_offsets)
+      → [circuit_reset] (worsened)
+      MSG: "Consumer offsets reset. Consumers re-processing all events from beginning. data-enrichment flooded."
+
+    ○ [anything else] → [circuit_reset] (default)
+      MSG: "System mostly recovered. Check event-bus consumer lag to confirm full recovery."
+
+  ■ [jvm_cleared_still_leaking]
+    DESC: JVM restarted (metaspace clear) but classloader-agent v1.12.0 still active. Re-leaking.
+    ──────────────────────────────────────────────────────────────────────
+    → rollback_deploy(classloader-agent)
+      → [classloaders_cleared] (progress)
+      MSG: "classloader-agent rolled back to v1.11.8. Leak stopped. Metaspace stable since JVM was just restarted. But rule-engine circuit breaker still OPEN — needs reset."
+
+    ○ restart_service(data-enrichment)
+      → [jvm_cleared_still_leaking] (no_effect)
+      MSG: "JVM restarted again. Metaspace clears but v1.12.0 resumes leaking. Same cycle."
+
+    ○ [anything else] → [jvm_cleared_still_leaking] (default)
+      MSG: "JVM clear but classloader-agent v1.12.0 re-leaking. Rollback classloader-agent to fix the leak source."
+
+  ★ [healthy] === RESOLVED ===
+
+==========================================================================================
+ kafka_partition_rebalance_storm_001 (hard, 4-step)
+==========================================================================================
+
+  ■ [broken]
+    DESC: ZK session_timeout=6000ms. partition-manager losing sessions. Continuous rebalance storm. Consumers starved.
+    ──────────────────────────────────────────────────────────────────────
+    → execute_runbook(zookeeper, update_config, {'key': 'session_timeout_ms', 'value': '30000'})
+      → [timeout_fixed] (progress)
+      MSG: "session_timeout_ms: 6000 → 30000. Applied to all ZK sessions. partition-manager sessions now survive GC pauses. Rebalance rate dropping. But existing assignments unstable — need to force stable assignment."
+
+    ✗ restart_service(kafka-broker)
+      → [broker_crashed] (worsened)
+      MSG: "kafka-broker restarted. Partition leaders migrating. Triggers MASSIVE rebalance across all consumer groups. Combined with 6s timeout, partition-manager immediately loses ZK session. Storm intensified."
+
+    ○ scale_replicas(kafka-broker)
+      → [broken] (no_effect)
+      MSG: "New broker added. Partition reassignment triggered. MORE rebalances. 6s timeout causes session loss during reassignment."
+
+    ○ execute_runbook(consumer-group-a, reset_offsets)
+      → [broken] (no_effect)
+      MSG: "Offsets reset. Consumers re-processing from beginning. Triggers group rejoin → more ZK session activity → more session timeouts → more rebalances."
+
+    → execute_runbook(partition-manager, pause_rebalancing)
+      → [rebalance_paused] (progress)
+      MSG: "Rebalancing paused. Current (fragmented) partition assignment frozen. Consumers processing with whatever partitions they have. Some partitions unassigned. ZK timeout still 6s."
+
+    ○ [anything else] → [broken] (default)
+      MSG: "No change. session_timeout=6000ms. Continuous rebalance storm. Consumers starved of partitions."
+
+  ■ [timeout_fixed]
+    DESC: ZK timeout fixed at 30s. Rebalance rate dropping. Partition assignment fragmented from storm.
+    ──────────────────────────────────────────────────────────────────────
+    → execute_runbook(partition-manager, force_stable_assignment)
+      → [assignment_stable] (progress)
+      MSG: "Partition assignment recalculated and locked. All partitions assigned to consumers. No rebalances pending. But consumer groups are still paused from the storm — need to resume consumption."
+
+    ✗ restart_service(kafka-broker)
+      → [timeout_fixed] (worsened)
+      MSG: "Broker restarted. Partition leaders migrate. Rebalance triggered. But 30s timeout means it recovers — just extended downtime."
+
+    ○ [anything else] → [timeout_fixed] (default)
+      MSG: "Timeout fixed. Rebalances slowing. Assignment still fragmented from storm. Force stable assignment on partition-manager."
+
+  ■ [assignment_stable]
+    DESC: Timeout fixed. Partitions assigned. Consumers processing but lagging from storm backlog.
+    ──────────────────────────────────────────────────────────────────────
+    → execute_runbook(consumer-group-a, resume_consumption)
+      → [consumers_running] (progress)
+      MSG: "consumer-group-a resumed. Processing backlog of events. Consumer lag: 2.4M events. But dead-letter-queue has overflow messages from failed processing during the storm."
+
+    ○ restart_service(partition-manager)
+      → [assignment_stable] (no_effect)
+      MSG: "partition-manager restarted. Assignment temporarily unstable during restart. Consumers briefly lose partitions."
+
+    ○ [anything else] → [assignment_stable] (default)
+      MSG: "Assignment stable. Consumers need to resume processing. Resume consumption on consumer groups."
+
+  ■ [consumers_running]
+    DESC: Consumers running. Lag draining. DLQ has overflow from storm period.
+    ──────────────────────────────────────────────────────────────────────
+    ★ execute_runbook(dead-letter-queue, drain_dlq)
+      → [healthy] (recovery)
+      MSG: "DLQ drained. Failed messages re-processed. Consumer lag dropping. System healthy."
+
+    ★ execute_runbook(dead-letter-queue, replay_messages)
+      → [healthy] (recovery)
+      MSG: "DLQ messages replayed to source topics. Consumers re-processing. DLQ emptying."
+
+    ○ execute_runbook(consumer-group-a, reset_offsets)
+      → [consumers_running] (no_effect)
+      MSG: "Offsets reset on consumer-group-a. Consumers now re-processing ALL events from beginning. Lag massively increased instead of draining."
+
+    ○ [anything else] → [consumers_running] (default)
+      MSG: "Consumers running. Lag draining. DLQ has overflow. Drain or replay DLQ messages."
+
+  ■ [rebalance_paused]
+    DESC: Rebalancing paused. Some partitions unassigned. ZK timeout still 6s.
+    ──────────────────────────────────────────────────────────────────────
+    → execute_runbook(zookeeper, update_config, {'key': 'session_timeout_ms', 'value': '30000'})
+      → [timeout_fixed] (progress)
+      MSG: "session_timeout fixed. Can now safely resume rebalancing without session expiry. But partition assignment still fragmented — need to force stable assignment."
+
+    ✗ execute_runbook(partition-manager, resume_rebalancing)
+      → [broken] (worsened)
+      MSG: "Rebalancing resumed with 6s timeout. partition-manager immediately loses ZK session during rebalance. Storm restarts."
+
+    ○ [anything else] → [rebalance_paused] (default)
+      MSG: "Rebalancing paused. ZK timeout still 6s. Fix timeout BEFORE resuming rebalancing."
+
+  ■ [broker_crashed]
+    DESC: Broker was restarted. Massive rebalance triggered. ZK timeout still 6s.
+    ──────────────────────────────────────────────────────────────────────
+    → execute_runbook(zookeeper, update_config, {'key': 'session_timeout_ms', 'value': '30000'})
+      → [timeout_fixed] (progress)
+      MSG: "session_timeout fixed. Rebalance from broker restart will settle with 30s timeout. But assignment still needs to be stabilized."
+
+    ✗ restart_service(kafka-broker)
+      → [broker_crashed] (worsened)
+      MSG: "Another broker restarted. More partition migrations. Storm amplified further."
+
+    ○ [anything else] → [broker_crashed] (default)
+      MSG: "Broker restarted. Rebalance storm active. Fix ZK session timeout first."
+
+  ★ [healthy] === RESOLVED ===
+
+==========================================================================================
+ numa_cross_socket_latency_001 (hard, 4-step)
+==========================================================================================
+
+  ■ [broken]
+    DESC: matching-engine migrated to NUMA node 1. Memory accesses crossing QPI at 3x latency. p99: 15ms (baseline 500us).
+    ──────────────────────────────────────────────────────────────────────
+    → execute_runbook(numa-balancer, disable_auto_migration)
+      → [migration_disabled] (progress)
+      MSG: "NUMA auto-migration disabled. matching-engine will not be migrated again. But process is still on node 1 — needs to be moved back to node 0."
+
+    → execute_runbook(matching-engine, pin_to_numa_node)
+      → [pinned_but_migrable] (progress)
+      MSG: "matching-engine pinned to NUMA node 0. Memory migrating back to local node. Latency improving. But auto-migration still enabled — kernel may migrate again on next load spike."
+
+    ○ scale_replicas(matching-engine)
+      → [broken] (no_effect)
+      MSG: "matching-engine scaled. New replica on NUMA node 1 (same host). Two instances competing for cross-socket memory. Lock contention on shared order book doubled."
+
+    ○ restart_service(matching-engine)
+      → [broken] (no_effect)
+      MSG: "matching-engine restarted. Kernel re-allocates to NUMA node — may land on node 0 or 1 randomly. Auto-migration still enabled. Not a reliable fix."
+
+    ✗ execute_runbook(session-cache, flush_stale_sessions)
+      → [broken] (worsened)
+      MSG: "Sessions flushed. session-cache was under pressure from long-held sessions during slowdown. Flushing dropped active trading sessions. NUMA issue unchanged."
+
+    ○ [anything else] → [broken] (default)
+      MSG: "No change. matching-engine on NUMA node 1. Cross-socket memory access at 3x latency."
+
+  ■ [migration_disabled]
+    DESC: Auto-migration disabled. matching-engine still on node 1. Needs pinning back to node 0.
+    ──────────────────────────────────────────────────────────────────────
+    → execute_runbook(matching-engine, pin_to_numa_node)
+      → [pinned_stable] (progress)
+      MSG: "matching-engine pinned to NUMA node 0. Memory migrating. Migration disabled — won't be moved again. Latency recovering."
+
+    → execute_runbook(numa-balancer, revert_last_migration)
+      → [pinned_stable] (progress)
+      MSG: "Last migration reverted via numa-balancer. matching-engine moved back to node 0. But auto-migration is now disabled AND order book needs compaction from the cross-socket period."
+
+    ○ restart_service(matching-engine)
+      → [migration_disabled] (no_effect)
+      MSG: "matching-engine restarted. May land on node 0 or 1 randomly. Migration disabled so it stays wherever it lands."
+
+    ○ [anything else] → [migration_disabled] (default)
+      MSG: "Migration disabled. matching-engine still on node 1. Pin to node 0 or revert last migration."
+
+  ■ [pinned_but_migrable]
+    DESC: Pinned to node 0 but auto-migration still enabled. Could migrate again.
+    ──────────────────────────────────────────────────────────────────────
+    → execute_runbook(numa-balancer, disable_auto_migration)
+      → [pinned_stable] (progress)
+      MSG: "Auto-migration disabled. matching-engine pinned AND protected from future migration. But order book still has contention from the cross-socket period — needs compaction."
+
+    ○ scale_replicas(matching-engine)
+      → [pinned_but_migrable] (no_effect)
+      MSG: "New replica may be auto-migrated. Pinning only applies to current process."
+
+    ○ [anything else] → [pinned_but_migrable] (default)
+      MSG: "Pinned to node 0 but auto-migration still active. Disable migration to make it permanent."
+
+  ■ [pinned_stable]
+    DESC: Pinned AND migration-safe. Latency recovering. But order-book has lock contention from storm period.
+    ──────────────────────────────────────────────────────────────────────
+    → execute_runbook(order-book, compact_order_book)
+      → [book_compacted] (progress)
+      MSG: "Order book compacted. Stale entries removed. Lock contention dropping to baseline. Memory layout optimized for node 0 access. But market-data feed was disrupted — may have stale ticks buffered."
+
+    ✗ restart_service(matching-engine)
+      → [pinned_stable] (worsened)
+      MSG: "matching-engine restarted unnecessarily. Active orders interrupted. In-flight matches dropped."
+
+    ○ [anything else] → [pinned_stable] (default)
+      MSG: "Pinned stable. Latency recovering. Order book has contention from storm period. Compact order book."
+
+  ■ [book_compacted]
+    DESC: Pinned, stable, book clean. Market data feed may have dropped ticks during latency spike.
+    ──────────────────────────────────────────────────────────────────────
+    ★ execute_runbook(market-data, reconnect_feed)
+      → [healthy] (recovery)
+      MSG: "Market data feed reconnected. Dropped tick buffer cleared. Full price feed restored. System healthy."
+
+    ★ execute_runbook(market-data, flush_feed_buffer)
+      → [healthy] (recovery)
+      MSG: "Feed buffer flushed. Stale ticks cleared. Feed resuming with fresh data."
+
+    ○ restart_service(market-data)
+      → [book_compacted] (no_effect)
+      MSG: "market-data restarted. Feed disconnected during restart. matching-engine operating without price updates for 10s."
+
+    ○ [anything else] → [book_compacted] (default)
+      MSG: "System mostly recovered. Market data feed may have stale ticks. Reconnect or flush feed buffer."
+
+  ★ [healthy] === RESOLVED ===
+
+==========================================================================================
+ etcd_compaction_quota_alarm_001 (expert, 5-step)
+==========================================================================================
+
+  ■ [broken]
+    DESC: backup-agent retention=720h. etcd DB at 8GB quota. ALARM:NOSPACE. k8s-apiserver read-only.
+    ──────────────────────────────────────────────────────────────────────
+    → execute_runbook(backup-agent, update_config, {'key': 'snapshot_retention_hours', 'value': '24'})
+      → [retention_fixed] (progress)
+      MSG: "backup-agent: snapshot_retention_hours 720 → 24. New snapshots follow correct policy. But existing old snapshots still on disk. etcd still at quota."
+
+    → execute_runbook(backup-agent, rollback_config)
+      → [retention_fixed] (progress)
+      MSG: "Config rolled back to pre-change values. snapshot_retention_hours restored to 24. But old snapshots still on disk filling the volume — need to clean them up before compacting etcd."
+
+    → execute_runbook(etcd-cluster, trigger_compaction)
+      → [partially_compacted] (progress)
+      MSG: "Compaction triggered. Some old revisions reclaimed. DB size dropped slightly. But backup-agent still creating snapshots at 720h retention — space will refill."
+
+    ✗ restart_service(etcd-cluster)
+      → [etcd_crashed] (worsened)
+      MSG: "etcd cluster restarted. Quorum lost for 30s. ALL Kubernetes operations suspended. DB still at quota — ALARM re-triggers on startup."
+
+    ○ scale_replicas(etcd-cluster)
+      → [broken] (no_effect)
+      MSG: "New etcd member joining. Must sync full 7.2GB database. Network IO + disk pressure on existing members. Same quota applies to new member."
+
+    → execute_runbook(etcd-cluster, adjust_quota)
+      → [quota_raised] (progress)
+      MSG: "Quota increased to 16GB. ALARM cleared (8GB < 16GB). Writes allowed. But backup-agent still at 720h retention — will fill 16GB too, just takes longer."
+
+    ○ [anything else] → [broken] (default)
+      MSG: "No change. etcd: ALARM:NOSPACE. DB at 8GB quota. k8s-apiserver: read-only. backup-agent: retention 720h."
+
+  ■ [retention_fixed]
+    DESC: Retention fixed at 24h. Old snapshots still on disk. etcd still at quota.
+    ──────────────────────────────────────────────────────────────────────
+    → execute_runbook(backup-agent, cleanup_old_snapshots)
+      → [snapshots_cleaned] (progress)
+      MSG: "Old snapshots being deleted. Freed 95GB. etcd data volume has more space. But etcd DB still near quota — need to compact etcd to reclaim revision space and clear ALARM."
+
+    → execute_runbook(etcd-cluster, trigger_compaction)
+      → [snapshots_cleaned] (progress)
+      MSG: "Compaction triggered. Reclaiming old revisions. With retention fixed, space won't refill."
+
+    ✗ restart_service(etcd-cluster)
+      → [etcd_crashed] (worsened)
+      MSG: "etcd restarted. Quorum lost. DB still at quota. ALARM re-triggers. Extended outage."
+
+    ○ [anything else] → [retention_fixed] (default)
+      MSG: "Retention fixed. Old snapshots still on disk. etcd DB still at quota. Clean old snapshots, then compact etcd."
+
+  ■ [snapshots_cleaned]
+    DESC: Retention fixed. Snapshots cleaned. etcd DB still near quota. Need compaction + alarm clear.
+    ──────────────────────────────────────────────────────────────────────
+    → execute_runbook(etcd-cluster, trigger_compaction)
+      → [compacted] (progress)
+      MSG: "Compaction complete. Old revisions reclaimed. DB size: 3.8GB. Below quota. But ALARM:NOSPACE is still armed — etcd won't accept writes until the alarm is explicitly disarmed."
+
+    → execute_runbook(etcd-cluster, defragment)
+      → [compacted] (progress)
+      MSG: "Defragmentation complete. Physical disk space reclaimed after compaction. DB file size reduced. But ALARM:NOSPACE still armed — need to disarm it before etcd accepts writes."
+
+    ✗ restart_service(etcd-cluster)
+      → [snapshots_cleaned] (worsened)
+      MSG: "etcd restarted. Quorum lost briefly. DB still near quota. ALARM persists."
+
+    ○ [anything else] → [snapshots_cleaned] (default)
+      MSG: "Snapshots cleaned. etcd DB still near quota. Compact or defragment etcd to reclaim space."
+
+  ■ [compacted]
+    DESC: DB compacted. Size below quota. ALARM may still be active (requires explicit disarm).
+    ──────────────────────────────────────────────────────────────────────
+    → execute_runbook(etcd-cluster, disarm_alarm)
+      → [alarm_cleared] (progress)
+      MSG: "ALARM:NOSPACE disarmed. etcd accepting writes. k8s-apiserver can perform write operations. But kube-scheduler has 28 pending pods queued from the outage — needs to resume scheduling."
+
+    ✗ restart_service(k8s-apiserver)
+      → [compacted] (worsened)
+      MSG: "k8s-apiserver restarted. API briefly unavailable. etcd ALARM still active — writes still rejected. Restart didn't help."
+
+    ○ [anything else] → [compacted] (default)
+      MSG: "DB compacted below quota. ALARM still active. Disarm alarm on etcd to allow writes."
+
+  ■ [alarm_cleared]
+    DESC: Alarm cleared. Writes working. But kube-scheduler has pending pods from outage.
+    ──────────────────────────────────────────────────────────────────────
+    ★ execute_runbook(kube-scheduler, resume_scheduling)
+      → [healthy] (recovery)
+      MSG: "Scheduling resumed. 28 pending pods being bound to nodes. Deployments proceeding. System fully operational."
+
+    ✗ restart_service(kube-scheduler)
+      → [alarm_cleared] (worsened)
+      MSG: "Scheduler restarted. Scheduling queue reset. Pending pods need to be re-detected. Extended scheduling delay."
+
+    ○ [anything else] → [alarm_cleared] (default)
+      MSG: "Alarm cleared. Writes working. kube-scheduler has pending pods from outage. Resume scheduling."
+
+  ■ [partially_compacted]
+    DESC: Compacted without fixing retention. Space freed but will refill. backup-agent still at 720h.
+    ──────────────────────────────────────────────────────────────────────
+    → execute_runbook(backup-agent, update_config, {'key': 'snapshot_retention_hours', 'value': '24'})
+      → [retention_fixed] (progress)
+      MSG: "Retention fixed. With compaction already done, etcd has space. Need to clean old snapshots and disarm alarm."
+
+    ○ execute_runbook(etcd-cluster, trigger_compaction)
+      → [partially_compacted] (no_effect)
+      MSG: "Compaction re-triggered. Minimal additional space freed — already compacted. backup-agent still at 720h, space will refill."
+
+    ○ [anything else] → [partially_compacted] (default)
+      MSG: "Partially compacted but retention still 720h. Fix backup-agent retention first."
+
+  ■ [quota_raised]
+    DESC: Quota raised to 16GB. Writes working temporarily. But retention still 720h — will fill 16GB too.
+    ──────────────────────────────────────────────────────────────────────
+    → execute_runbook(backup-agent, update_config, {'key': 'snapshot_retention_hours', 'value': '24'})
+      → [retention_fixed] (progress)
+      MSG: "Retention fixed. With larger quota, immediate pressure relieved. But old snapshots still on disk — need to clean old snapshots and then compact etcd."
+
+    ✗ restart_service(etcd-cluster)
+      → [quota_raised] (worsened)
+      MSG: "etcd restarted with 16GB quota. Quorum lost briefly. Unnecessary downtime. Retention still 720h."
+
+    ○ [anything else] → [quota_raised] (default)
+      MSG: "Quota raised. Writes working temporarily. backup-agent retention 720h — will fill 16GB. Fix retention."
+
+  ■ [etcd_crashed]
+    DESC: etcd was restarted. Recovering from quorum loss. DB still at quota.
+    ──────────────────────────────────────────────────────────────────────
+    → execute_runbook(backup-agent, update_config, {'key': 'snapshot_retention_hours', 'value': '24'})
+      → [retention_fixed] (progress)
+      MSG: "Retention fixed. etcd recovering from restart. Once quorum restored, still need to clean old snapshots, compact etcd, and clear alarm."
+
+    ✗ restart_service(etcd-cluster)
+      → [etcd_crashed] (worsened)
+      MSG: "etcd restarted AGAIN during recovery. Recovery interrupted. Starting from scratch. Extended downtime."
+
+    ○ [anything else] → [etcd_crashed] (default)
+      MSG: "etcd recovering from restart. DB at quota. Fix backup-agent retention first."
+
+  ★ [healthy] === RESOLVED ===
+
+==========================================================================================
+ kernel_tcp_rmem_silent_drop_001 (expert, 5-step)
+==========================================================================================
+
+  ■ [broken]
+    DESC: net.core.rmem_max=256KB on all app nodes. TCP buffer exhaustion. Connection resets across ALL services.
+    ──────────────────────────────────────────────────────────────────────
+    → execute_runbook(sysctl-agent, rollback_last_tuning)
+      → [sysctl_reverted] (progress)
+      MSG: "Last tuning job rolled back. All sysctl parameters restored to pre-tuning values on all nodes. net.core.rmem_max=16777216. TCP buffers can now grow. Existing connections may still have small buffers — need to cycle them."
+
+    → execute_runbook(sysctl-agent, update_config, {'key': 'net.core.rmem_max', 'value': '16777216'})
+      → [sysctl_reverted] (progress)
+      MSG: "net.core.rmem_max set to 16777216 on all nodes. TCP buffers restored. Other tuned params may still be wrong — rollback is more complete."
+
+    ✗ restart_service(api-server)
+      → [broken] (worsened)
+      MSG: "api-server restarted. New process gets same kernel buffer limits (256KB). Connection resets resume immediately. Active requests dropped during restart."
+
+    ○ scale_replicas(api-server)
+      → [broken] (no_effect)
+      MSG: "api-server scaled. New replicas on SAME nodes with 256KB rmem. More instances = more connections = more buffer exhaustion. Total resets increased."
+
+    ✗ restart_service(cache-redis)
+      → [broken] (worsened)
+      MSG: "Redis restarted. All cached data lost (no persistence). Applications hammering cold cache + STILL getting resets. Double impact."
+
+    ○ execute_runbook(sysctl-agent, show_diff_from_baseline)
+      → [broken] (no_effect)
+      MSG: "Diff: net.core.rmem_max: baseline=16777216, current=262144. net.core.wmem_max: baseline=16777216, current=262144. Changed by tuning job 6 min ago."
+
+    ○ [anything else] → [broken] (default)
+      MSG: "No change. net.core.rmem_max=262144 on all nodes. Connection resets across all services."
+
+  ■ [sysctl_reverted]
+    DESC: Kernel params restored. New connections OK. Existing connections still on old 256KB buffers. Some backends marked DOWN.
+    ──────────────────────────────────────────────────────────────────────
+    → execute_runbook(sysctl-agent, validate_current_settings)
+      → [settings_validated] (progress)
+      MSG: "Settings validated across all nodes. rmem_max=16777216 confirmed on 8 nodes. All consistent. But some backends still marked DOWN from earlier resets — need to force recheck on haproxy-lb."
+
+    → execute_runbook(haproxy-lb, force_backend_recheck)
+      → [settings_validated] (progress)
+      MSG: "Backend health rechecked. Backends recovering now that TCP buffers are correct. Some still transitioning."
+
+    ○ restart_service(api-server)
+      → [sysctl_reverted] (no_effect)
+      MSG: "api-server restarted. With correct kernel params, new process works fine. But restart dropped active requests unnecessarily."
+
+    ○ [anything else] → [sysctl_reverted] (default)
+      MSG: "Kernel params fixed. New connections healthy. Some backends still marked DOWN. Validate settings and recheck backends."
+
+  ■ [settings_validated]
+    DESC: Params correct across all nodes. Backends recovering. Redis has stale reset connections.
+    ──────────────────────────────────────────────────────────────────────
+    → execute_runbook(haproxy-lb, force_backend_recheck)
+      → [backends_healthy] (progress)
+      MSG: "All backends rechecked. 8 marked healthy. Load balancing restored. But cache-redis still has stale connections from when buffers were undersized — causing intermittent cache misses."
+
+    ✗ restart_service(haproxy-lb)
+      → [settings_validated] (worsened)
+      MSG: "HAProxy restarted. All connections dropped. Clients see brief total outage. Backends re-discovered but took 15s."
+
+    ○ [anything else] → [settings_validated] (default)
+      MSG: "Settings correct. Some backends still DOWN. Force recheck on haproxy-lb."
+
+  ■ [backends_healthy]
+    DESC: LB healthy. All backends UP. Redis has stale connections from reset period.
+    ──────────────────────────────────────────────────────────────────────
+    → execute_runbook(cache-redis, flush_stale_connections)
+      → [redis_clean] (progress)
+      MSG: "Stale Redis connections flushed. Clients reconnecting with healthy TCP buffers. Cache hit rate recovering. But payment-gateway external connectivity hasn't been verified since the disruption."
+
+    ✗ restart_service(cache-redis)
+      → [backends_healthy] (worsened)
+      MSG: "Redis restarted. ALL cached data lost. Cold cache storm + all clients need to reconnect."
+
+    ○ [anything else] → [backends_healthy] (default)
+      MSG: "Backends healthy. Redis has stale connections. Flush stale connections on Redis."
+
+  ■ [redis_clean]
+    DESC: Sysctl fixed. LB healthy. Redis clean. Payment gateway may have lost Stripe connection.
+    ──────────────────────────────────────────────────────────────────────
+    ★ execute_runbook(payment-gateway, test_stripe_connectivity)
+      → [healthy] (recovery)
+      MSG: "Stripe API connection: OK. Payment processing verified. All services fully operational."
+
+    ✗ execute_runbook(payment-gateway, rotate_api_keys)
+      → [redis_clean] (worsened)
+      MSG: "API keys rotated. Old keys invalidated immediately. Payment processing interrupted until new keys propagate. Unnecessary action."
+
+    ○ [anything else] → [redis_clean] (default)
+      MSG: "Most services recovered. Verify payment gateway connectivity to ensure external integrations work."
+
+  ★ [healthy] === RESOLVED ===

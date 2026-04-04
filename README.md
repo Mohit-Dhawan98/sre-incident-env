@@ -1,6 +1,6 @@
 ---
 title: SRE Incident Response Environment
-emoji: 🔧
+emoji: "\U0001F527"
 colorFrom: red
 colorTo: gray
 sdk: docker
@@ -9,7 +9,9 @@ app_port: 8000
 
 # SRE Incident Response Environment
 
-An OpenEnv RL environment that simulates on-call Site Reliability Engineering. An AI agent receives a production incident alert, investigates by querying service logs and metrics across a multi-service architecture, traces causal chains through red herrings and cascading failures, and submits a root-cause diagnosis. The environment scores it automatically — zero LLM calls at runtime, fully deterministic.
+An OpenEnv RL environment that simulates the full on-call SRE lifecycle: investigate a production incident across a multi-service architecture, diagnose the root cause, apply multi-step remediation (where wrong actions make things worse), and verify resolution. The environment is a **state-graph maze** — the agent navigates through broken, degraded, and critical states to reach healthy.
+
+17 real-world production incidents across 4 difficulty tiers. 96 states, 253 actions, trap doors at every intermediate state. Fully deterministic reward, zero LLM calls at runtime.
 
 ## Quick Start
 
@@ -21,113 +23,169 @@ pip install git+https://huggingface.co/spaces/Maverick98/sre-incident-env
 from client import SREIncidentEnv
 
 async with SREIncidentEnv(base_url="https://Maverick98-sre-incident-env.hf.space") as env:
-    await env.reset(difficulty="medium")
+    obs = await env.reset(difficulty="medium")
     tools = await env.list_tools()
+
+    # 1. Investigate
     result = await env.call_tool("list_services")
-    result = await env.call_tool("read_logs", service="api-gateway", window_minutes=10)
-    result = await env.call_tool("submit_diagnosis",
-        affected_service="product-cache",
-        failure_type="cache_node_failure",
-        root_cause="product-cache node failed causing checkout fallback",
-        causal_chain="product-cache,checkout-service,api-gateway",
-        confidence=0.85)
+    result = await env.call_tool("read_logs", service="session-db", level_filter="ERROR")
+    result = await env.call_tool("check_metric", service="session-db", metric="error_rate")
+
+    # 2. Discover available actions
+    result = await env.call_tool("get_service_info", service="session-db")
+
+    # 3. Remediate (multi-step — order matters)
+    result = await env.call_tool("execute_runbook", service="session-db",
+        action="update_config", params='{"key": "connection_timeout", "value": "30000"}')
+    result = await env.call_tool("read_logs", service="session-db")  # observe outcome
+
+    result = await env.call_tool("execute_runbook", service="session-db",
+        action="terminate_idle_connections")
+    result = await env.call_tool("read_logs", service="session-db")  # observe outcome
+
+    # 4. Verify resolution + submit diagnosis
+    result = await env.call_tool("verify_resolution",
+        affected_service="session-db",
+        failure_type="config_drift",
+        root_cause="session-db connection_timeout drifted to 300s causing idle connection buildup",
+        causal_chain="session-db,user-service,api-gateway")
 ```
 
-## How an Agent Interacts
+## Tools (10 MCP tools)
 
-The environment exposes 4 MCP tools:
-
-| Tool | Description |
-|------|-------------|
-| `list_services` | Returns service names in the incident topology |
-| `read_logs(service, window_minutes, level_filter)` | Returns log entries for a service |
-| `check_metric(service, metric, window_minutes)` | Returns metric time-series (30s resolution) |
-| `submit_diagnosis(affected_service, failure_type, root_cause, causal_chain, confidence)` | Submits diagnosis, returns reward, ends episode |
-
-The agent has a generous query budget (100) — difficulty comes from scenario content, not resource constraints.
-
-## Difficulty Tiers
-
-| Tier | Count | Avg Score (frontier models) | What Makes It Hard |
-|------|-------|---------------------------|-------------------|
-| **Easy** | 5 | ~0.64 | Familiar failure patterns, clear signals, some investigation needed |
-| **Medium** | 5 | ~0.52 | Multiple suspects, misleading red herrings, ambiguous metrics |
-| **Hard** | 5 | ~0.35 | Deep chains, obscure mechanisms, multiple red herrings |
-| **Expert** | 2 | ~0.19 | Invisible root, no metric clues, obscure kernel/infrastructure failures |
-
-17 scenarios calibrated using joint consensus of o4-mini and gemini-2.5-flash. Hard/expert feature real production failures: NUMA cross-socket latency, CPU TSC drift, JVM metaspace exhaustion, Kafka partition rebalancing storms.
-
-## Reward Function (V5)
-
-7 components, all deterministic. No embedding models.
-
-**Tier 1 — Did you solve it? (0.65):**
-
-| Component | Weight | Method |
-|-----------|--------|--------|
-| Service identification | 0.25 | Exact match on root service (+ 0.08 adjacency partial) |
-| Failure type | 0.15 | Exact match from 20-type taxonomy |
-| Causal chain | 0.15 | F1 score vs golden propagation chain |
-| Explanation keywords | 0.10 | Golden keyword checklist (5 terms per scenario) |
-
-**Tier 2 — How did you solve it? (0.35):**
-
-| Component | Weight | Method |
-|-----------|--------|--------|
-| Query efficiency | 0.20 | Actual vs per-scenario optimal queries |
-| Investigation waste | 0.08 | Penalizes duplicate queries, tunnel vision |
-| Investigation breadth | 0.07 | Fraction of causal-chain services investigated |
-
-**Anti-gaming:** Components 2-4 are GATED on correct service identification. Wrong service = 0 on Tier 1. No free points.
-
-## Baseline Scores
-
-Reproducible scores from `inference.py` (1 episode per tier):
-
-| Model | Easy | Medium | Hard | Expert | Overall |
-|-------|------|--------|------|--------|---------|
-| gpt-5.4 | 0.71 | 0.62 | 0.35 | 0.19 | 0.48 |
-| o4-mini | 0.65 | 0.48 | 0.38 | 0.27 | 0.46 |
-| gemini-2.5-flash | 0.57 | 0.45 | ~0.30 | ~0.15 | 0.40 |
-
-Hard/expert scenarios genuinely challenge frontier models. Easy scenarios are solvable with basic log-following.
-
-## Action & Observation Spaces
-
-**Action** (`CallToolAction`): Agent calls one of 4 MCP tools per step. Each tool has typed parameters.
-
-**Observation** (`SREObservation`):
-- `done: bool` — episode finished?
-- `reward: float` — 0.0-1.0 (only non-zero on submit_diagnosis)
-- `logs: List[LogEntry]` — `{timestamp, service, level, message}`
-- `metric_series: List[MetricPoint]` — `{timestamp, value}`
-- `services: List[str]` — service names (from list_services)
-- `message: str` — alert text on reset, status messages
-
-**State** (`SREState`): `episode_id`, `step_count`, `scenario_id`, `difficulty`, `services`, `queries_used`, `query_budget`, `diagnosis_submitted`, `current_reward`
+| Category | Tool | Description |
+|----------|------|-------------|
+| Discovery | `list_services` | Service topology (free, no query cost) |
+| Investigation | `read_logs(service, window_minutes, level_filter)` | Logs for a service. Post-remediation logs reflect changed state |
+| Investigation | `check_metric(service, metric, window_minutes)` | Metric time-series (30s resolution) |
+| Discovery | `get_service_info(service)` | Service runbook: available actions, config params, recent deploys |
+| Platform | `restart_service(service)` | Bounce service (clears runtime state, not config) |
+| Platform | `rollback_deploy(service)` | Revert to previous deployment version |
+| Platform | `scale_replicas(service, count)` | Scale horizontally |
+| Application | `execute_runbook(service, action, params)` | Service-specific maintenance action (discovered via get_service_info) |
+| Terminal | `verify_resolution(affected_service, failure_type, root_cause, causal_chain)` | Check system health + submit diagnosis. Ends episode |
+| Terminal | `submit_diagnosis(...)` | V1 compat — diagnosis only, no remediation check |
 
 ## Episode Flow
 
 ```
-Agent                              Environment
-  │                                     │
-  │──── reset(difficulty="hard") ──────>│  Pick scenario, generate logs/metrics
-  │<─── alert message ─────────────────│
-  │                                     │
-  │──── list_services() ───────────────>│  (free)
-  │<─── ["api-gw","cache","db",...] ────│
-  │                                     │
-  │──── read_logs("api-gw", ERROR) ────>│
-  │<─── [{ts, svc, level, msg},...] ────│
-  │                                     │
-  │──── check_metric("db","latency") ──>│
-  │<─── [{ts: .., value: 22}, ...] ─────│
-  │                                     │
-  │  ... investigate until confident ... │
-  │                                     │
-  │──── submit_diagnosis(cause,svc) ───>│  Compute reward, end episode
-  │<─── reward=0.72, done=True ─────────│
+Agent                                   Environment (State Machine)
+  |                                          |
+  |--- reset(difficulty="hard") ----------->|  Pick scenario, system_state = "broken"
+  |<-- [INCIDENT ALERT] title + hint -------|
+  |                                          |
+  |--- list_services() ------------------->|  (free)
+  |<-- ["api-gw","session-db","cache",...] --|
+  |                                          |
+  |--- read_logs("session-db", ERROR) ---->|  system_state: broken
+  |<-- [{ts, svc, ERROR, "timeout 300s"}]---|
+  |                                          |
+  |--- get_service_info("session-db") ---->|  Discover: update_config, terminate_idle, ...
+  |<-- {available_actions: [...], ...} ------|
+  |                                          |
+  |--- execute_runbook("session-db",       |
+  |      "update_config", {timeout:30000}) >|  Correct step 1 -> system_state: "config_fixed"
+  |<-- "pg_reload_conf() applied. ..." ------|
+  |                                          |
+  |--- read_logs("session-db") ----------->|  New logs show config applied
+  |<-- [{INFO, "timeout now 30000ms"}] ------|
+  |                                          |
+  |--- execute_runbook("session-db",       |
+  |      "terminate_idle_connections") ---->|  Correct step 2 -> system_state: "healthy"
+  |<-- "47 idle connections terminated" ------|
+  |                                          |
+  |--- verify_resolution(diagnosis...) --->|  System healthy + grade diagnosis
+  |<-- reward=0.92, done=True ---------------|
 ```
+
+## State Graph Design
+
+Each scenario defines a **directed graph of system states**. The agent navigates through it:
+
+```
+  [broken] --correct step 1--> [partially_fixed] --correct step 2--> [healthy]
+     |                              |
+     |--wrong action--> [critical]  |--wrong action--> [degraded]
+     |                      |                              |
+     |--no_effect--> [broken]       +---correct step 1---->+
+```
+
+- **Forward:** correct action in correct order advances state toward healthy
+- **Sideways:** wrong action stays in same state (wasted step)
+- **Backward:** trap action moves to critical/degraded (harder to recover)
+- **Recovery:** even from critical, correct actions still lead forward (with penalty)
+
+The agent discovers which direction it moved by **observing** (read_logs/check_metric after each action). The environment never tells the agent "you progressed" or "that was wrong" — it shows system state changes and the agent must infer.
+
+### Difficulty = Steps + Investigation Depth + Trap Density
+
+| Tier | Steps to Fix | Investigation | Traps per State | Total States |
+|------|-------------|---------------|-----------------|-------------|
+| Easy | 2 | Logs explicit | 1-2 | 3-4 |
+| Medium | 2-3 | Logs hint at cause | 2-3 | 4-5 |
+| Hard | 4 | Root cause hidden in noise | 3-4 | 5-6 |
+| Expert | 5 | Root cause invisible in logs | 4-5 | 6-7 |
+
+## Reward Function
+
+### Design Philosophy
+
+The reward is computed **at episode end** (terminal), not per-step. This is deliberate:
+
+1. **Per-step rewards bias route selection.** An agent rewarded for "getting closer" learns to game proximity signals — moving toward the goal but getting stuck in dead ends. End-of-episode reward forces the agent to learn the complete path.
+2. **The agent already gets per-step STATE feedback.** After every remediation, the agent can read_logs and check_metric to see what changed. This is the navigation signal — the reward is the final score.
+3. **Per-step penalty is implicit.** More steps = lower efficiency score. The agent is incentivized to find the shortest correct path without an explicit -1/step.
+4. **Partial credit exists.** An agent that investigates well but fails to fix still scores ~0.25. An agent that fixes but has bad diagnosis scores ~0.55. Full credit requires both.
+
+### 7 Components (1.0 total)
+
+| # | Component | Weight | What it measures |
+|---|-----------|--------|-----------------|
+| 1 | Investigation quality | 0.10 | Targeted investigation vs spray-and-pray |
+| 2 | Reached exit | 0.35 | Did the system reach healthy state? |
+| 3 | Path efficiency | 0.15 | Optimal steps vs actual remediation attempts |
+| 4 | Trap avoidance | 0.15 | Avoided actions that worsened the system |
+| 5 | Scouting behavior | 0.10 | Observed after fix (0.05) + discovered before action (0.05) |
+| 6 | No wasted moves | 0.05 | Unique remediation actions vs total |
+| 7 | Diagnosis quality | 0.10 | Service + type + keywords (GATED on system_healthy) |
+
+### Anti-Gaming Properties
+
+| Agent Strategy | Max Score | Why |
+|----------------|-----------|-----|
+| Skip investigation, guess fix | ~0.55 | Low investigation + may trigger traps |
+| Investigate forever, never fix | ~0.25 | Investigation + trap avoidance, no exit/efficiency/diagnosis |
+| Brute-force all tools | ~0.20 | Traps triggered + wasted moves + low efficiency |
+| Fix correctly, bad diagnosis | ~0.55 | Exit + efficiency + traps, no diagnosis |
+| Perfect: investigate, fix, diagnose | 1.00 | All components |
+
+### Why Diagnosis is Gated on System Health
+
+If you didn't fix the system, your diagnosis is untested. A correct diagnosis that wasn't acted on is worth 0 — this prevents agents from gaming diagnosis-only without attempting remediation.
+
+## Scenarios (17)
+
+| # | ID | Tier | Steps | Root Cause |
+|---|-----|------|-------|-----------|
+| 1 | circular_deadlock | Easy | 2 | Lock manager with deadlock detection disabled |
+| 2 | connection_leak | Easy | 2 | API gateway middleware leaking file descriptors |
+| 3 | connection_pool | Easy | 2 | Inventory service connection pool exhaustion |
+| 4 | dns_misconfig | Easy | 2 | CoreDNS stub zone causing split-brain resolution |
+| 5 | bad_index_drop | Easy | 2 | Dropped index on 2B-row analytics table |
+| 6 | cache_stampede | Medium | 3 | Cold cache + thundering herd on product API |
+| 7 | config_drift | Medium | 3 | Session DB timeout drifted from 30s to 300s |
+| 8 | page_cache | Medium | 3 | Analytics engine sequential scan evicting page cache |
+| 9 | thundering_herd | Medium | 3 | CDN cache purge + deploy causing origin flood |
+| 10 | wal_disk_full | Medium | 2 | WAL archive permissions broken + disk full |
+| 11 | cert_expiry | Hard | 4 | Mutual TLS cert expired on billing service |
+| 12 | cpu_tsc_drift | Hard | 4 | CPU microcode update caused TSC clock drift |
+| 13 | jvm_metaspace | Hard | 4 | Classloader agent leaking metaspace memory |
+| 14 | kafka_rebalance | Hard | 4 | Zookeeper session timeout causing partition storms |
+| 15 | numa_cross_socket | Hard | 4 | NUMA auto-migration causing cross-socket latency |
+| 16 | etcd_compaction | Expert | 5 | etcd compaction backlog triggering quota alarm |
+| 17 | kernel_tcp_rmem | Expert | 5 | Kernel TCP receive buffer silently dropping packets |
+
+Each scenario has domain-specific service_info (Redis-specific actions for cache services, PostgreSQL-specific for databases, CoreDNS-specific for resolvers, etc.).
 
 ## Run Locally
 
@@ -135,18 +193,16 @@ Agent                              Environment
 git clone https://huggingface.co/spaces/Maverick98/sre-incident-env
 cd sre-incident-env
 uv sync
-uvicorn server.app:app --host 0.0.0.0 --port 8000
+uv run server
 ```
 
 ## Run Inference
 
 ```bash
-# Set required env vars
-export API_BASE_URL="https://api.openai.com/v1"
-export MODEL_NAME="gpt-4o-mini"
-export HF_TOKEN="your-api-key"
+export OPENAI_API_KEY="your-key"
+export MODEL_NAME="gpt-5.4"
 
-# Run baseline (all 4 difficulties, 2 episodes each)
+# All 17 scenarios
 python inference.py
 
 # Against HF Space
@@ -156,29 +212,11 @@ python inference.py --space https://Maverick98-sre-incident-env.hf.space
 python inference.py --difficulty hard --episodes 3
 ```
 
-## Training with Real Incident Data
-
-The environment is a **pluggable framework**, not just 17 fixed scenarios. Any organization can convert their past incidents into training data:
-
-```bash
-export OPENENV_CUSTOM_REGISTRY=/path/to/your_incidents.jsonl
-```
-
-Each incident in the JSONL defines: service topology, log templates, metric patterns, golden root cause, causal chain, and explanation keywords. The reward function works unchanged — it scores against the golden data in each incident.
-
-**Why this matters for RL training:**
-- A company with 500 past P0/P1 incidents = 500 training episodes
-- The agent learns patterns from YOUR specific infrastructure
-- Difficulty scales naturally — real incidents range from obvious to obscure
-- Deterministic reward enables stable RL gradients
-- Partial credit (Tier 2: investigation quality) provides signal even on wrong diagnoses
-
-See [`scenarios/schema.md`](scenarios/schema.md) for the JSONL format and [`scenarios/difficulty_calibration.md`](scenarios/difficulty_calibration.md) for the 4-dimension difficulty framework.
-
 ## Architecture
 
-- **Environment server**: MCPEnvironment (FastMCP) with 4 tools
+- **Environment server**: MCPEnvironment (FastMCP) with 10 MCP tools
+- **State machine**: Graph-based traversal with per-state action tables
 - **Reward**: Fully deterministic, 7 components, no model dependencies
-- **Scenarios**: 17 built-in (5 easy + 5 medium + 5 hard + 2 expert) + custom JSONL registry
-- **Client**: MCPToolClient (async/sync), installable via pip
-- **Inference**: Native OpenAI function calling, smart context summarization
+- **Scenarios**: 17 built-in (5 easy + 5 medium + 5 hard + 2 expert), 96 states, 253 actions
+- **Client**: MCPToolClient (async), WebSocket with configurable ping
+- **Inference**: OpenAI function calling, smart context summarization

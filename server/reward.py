@@ -370,102 +370,109 @@ def compute_reward(
     # V2.1 MODE: MAZE NAVIGATION REWARD
     # ══════════════════════════════════════════════════════════════════
     #
-    # Treat the incident as a maze. Score HOW the agent navigated.
+    # 8 components summing to 1.0. Mix of positive rewards AND penalties.
+    # Positive components reward good behavior. Penalties punish waste/harm.
+    # Perfect run = 1.0. Harder scenarios naturally score lower because
+    # more steps = more chances for waste and lower efficiency.
     #
-    # 1. REACHED EXIT (0.30) — did the system reach healthy?
-    # 2. PATH EFFICIENCY (0.20) — optimal steps vs actual
-    # 3. TRAP AVOIDANCE (0.15) — avoided worsened outcomes
-    # 4. SCOUTING (0.10) — observed after fix + discovered before action
-    # 5. NO WASTED MOVES (0.10) — unique actions vs total
-    # 6. DIAGNOSIS (0.15) — understood what they fixed
+    # Positive (max 1.0 if perfect):
+    #   1. REACHED EXIT        (0.30) — fixed the system
+    #   2. PATH EFFICIENCY     (0.20) — optimal steps vs actual (ratio-based)
+    #   3. DIAGNOSIS           (0.15) — understood what was fixed (gated on exit)
+    #   4. INVESTIGATION       (0.10) — targeted investigation quality
+    #   5. TRAP AVOIDANCE      (0.10) — avoided worsened outcomes
+    #   6. SCOUTING            (0.05) — discovered before action + observed after
+    #   7. NO WASTED MOVES     (0.05) — unique actions vs total
+    #
+    # Penalty (subtractive):
+    #   8. STEP PENALTY        (-0.02 per remediation step beyond optimal)
+    #                          (-0.005 per investigation step beyond budget)
 
-    # ── 0. INVESTIGATION QUALITY (0.10) ────────────────────────────
-    # Reuse V1 breadth + efficiency scores (already computed above)
-    # breadth_score max 0.07, efficiency_score max 0.08 → scale to 0.10
-    # Rewards targeted investigation, penalizes spray-and-pray
-    maze_investigation = min(0.10,
-        (breadth_score / 0.07) * 0.05 + (efficiency_score / 0.08) * 0.05
-    ) if (breadth_score + efficiency_score) > 0 else 0.0
+    # ── 1. REACHED EXIT (0.30) ─────────────────────────────────────
+    maze_exit = 0.30 if system_healthy else 0.0
 
-    # ── 1. REACHED EXIT (0.35) ─────────────────────────────────────
-    maze_exit = 0.35 if system_healthy else 0.0
-
-    # ── 2. PATH EFFICIENCY (0.15) ──────────────────────────────────
-    # How many remediation steps vs optimal?
+    # ── 2. PATH EFFICIENCY (0.20) ──────────────────────────────────
+    # Ratio-based: optimal / actual. Full credit at optimal, decays linearly.
     if remediation_count == 0:
-        maze_efficiency = 0.0  # Never tried to fix
-    elif remediation_count <= optimal_steps:
-        maze_efficiency = 0.15  # At or below optimal
-    elif remediation_count <= optimal_steps * 2:
-        maze_efficiency = 0.15 * (1.0 - (remediation_count - optimal_steps) / optimal_steps)
-    elif remediation_count <= optimal_steps * 4:
-        maze_efficiency = 0.15 * 0.25 * (1.0 - (remediation_count - optimal_steps * 2) / (optimal_steps * 2))
-    else:
         maze_efficiency = 0.0
-
-    # ── 3. TRAP AVOIDANCE (0.15) ───────────────────────────────────
-    # Start at 0.15, lose 0.10 per trap door triggered
-    # 1 trap = 0.05, 2 traps = 0.00, 3+ = 0.00
-    maze_traps = max(0.0, 0.15 - harm_count * 0.10)
-
-    # ── 4. SCOUTING (0.10) — only counts if agent actually remediated ──
-    # 4a. Observe after fix: read_logs/check_metric after remediation (0.05)
-    if remediation_count > 0:
-        observe_ratio = min(1.0, observation_after_fix / remediation_count)
-        maze_observe = 0.05 * observe_ratio
     else:
-        maze_observe = 0.0  # No remediation = no scouting credit
+        ratio = min(1.0, optimal_steps / remediation_count)
+        maze_efficiency = 0.20 * ratio
 
-    # 4b. Discover before action: get_service_info before execute_runbook (0.05)
-    if execute_runbook_count > 0:
-        discover_ratio = min(1.0, discovered_before_action / execute_runbook_count)
-        maze_discover = 0.05 * discover_ratio
-    elif remediation_count > 0:
-        maze_discover = 0.05  # Used platform tools only (no execute_runbook needed)
-    else:
-        maze_discover = 0.0  # No remediation = no scouting credit
-
-    maze_scout = maze_observe + maze_discover
-
-    # ── 5. NO WASTED MOVES (0.10) ──────────────────────────────────
-    if remediation_count > 0:
-        unique_ratio = min(1.0, unique_remediation_count / remediation_count)
-        maze_unique = 0.05 * unique_ratio
-    else:
-        maze_unique = 0.0  # No remediation = no credit
-
-    # ── 6. DIAGNOSIS (0.10) ────────────────────────────────────────
-    # GATED on system_healthy — if you didn't fix it, diagnosis is worthless
+    # ── 3. DIAGNOSIS (0.15) — gated on system_healthy ──────────────
     if system_healthy:
         sub_svc = submitted_service.strip().lower()
         true_svc = true_root_service.strip().lower()
 
-        diag_service = 0.05 if sub_svc == true_svc else (0.02 if services_graph and sub_svc in _get_neighbors(true_svc, services_graph) else 0.0)
+        diag_service = 0.07 if sub_svc == true_svc else (0.03 if services_graph and sub_svc in _get_neighbors(true_svc, services_graph) else 0.0)
 
-        diag_type = 0.03 if (submitted_failure_type.strip().lower() == true_failure_type.strip().lower() and submitted_failure_type.strip()) else 0.0
+        diag_type = 0.04 if (submitted_failure_type.strip().lower() == true_failure_type.strip().lower() and submitted_failure_type.strip()) else 0.0
 
         submitted_text = submitted_root_cause.strip().lower()
         if explanation_keywords and len(submitted_text) >= 10:
             found = sum(1 for kw in explanation_keywords if kw.lower() in submitted_text)
-            diag_keywords = (found / len(explanation_keywords)) * 0.02
+            diag_keywords = (found / len(explanation_keywords)) * 0.04
         else:
             diag_keywords = 0.0
 
         maze_diagnosis = diag_service + diag_type + diag_keywords
     else:
-        maze_diagnosis = 0.0  # Didn't fix it = diagnosis worthless
+        maze_diagnosis = 0.0
+
+    # ── 4. INVESTIGATION QUALITY (0.10) ────────────────────────────
+    maze_investigation = min(0.10,
+        (breadth_score / 0.07) * 0.05 + (efficiency_score / 0.08) * 0.05
+    ) if (breadth_score + efficiency_score) > 0 else 0.0
+
+    # ── 5. TRAP AVOIDANCE (0.10) ───────────────────────────────────
+    # Full credit for zero traps. Lose 0.05 per trap. Rewards careful navigation.
+    maze_traps = max(0.0, 0.10 - harm_count * 0.05)
+
+    # ── 6. SCOUTING (0.05) ────────────────────────────────────────
+    maze_scout = 0.0
+    if remediation_count > 0:
+        observe_ratio = min(1.0, observation_after_fix / remediation_count)
+        maze_scout += 0.025 * observe_ratio
+        if execute_runbook_count > 0:
+            discover_ratio = min(1.0, discovered_before_action / execute_runbook_count)
+            maze_scout += 0.025 * discover_ratio
+        else:
+            maze_scout += 0.025
+
+    # ── 7. NO WASTED MOVES (0.05) ──────────────────────────────────
+    # Rewards unique actions. Penalizes repeating same (tool, target, action).
+    if remediation_count > 0:
+        unique_ratio = min(1.0, unique_remediation_count / remediation_count)
+        maze_unique = 0.05 * unique_ratio
+    else:
+        maze_unique = 0.0
+
+    # ── 8. STEP PENALTY (subtractive) ──────────────────────────────
+    # -0.02 per excess remediation step beyond optimal
+    excess_rem = max(0, remediation_count - optimal_steps)
+    penalty_rem = excess_rem * 0.02
+
+    # -0.005 per excess investigation step beyond reasonable budget
+    total_investigative = len([
+        (t, a) for t, a in tool_call_history
+        if t in ("read_logs", "check_metric", "get_service_info")
+    ])
+    reasonable_budget = optimal_steps * 4 + 8
+    excess_inv = max(0, total_investigative - reasonable_budget)
+    penalty_inv = excess_inv * 0.005
 
     # ══════════════════════════════════════════════════════════════════
     # TOTAL
     # ══════════════════════════════════════════════════════════════════
-    total = (
-        maze_investigation
-        + maze_exit
-        + maze_efficiency
-        + maze_traps
-        + maze_scout
-        + maze_unique
-        + maze_diagnosis
+    positive = (
+        maze_exit + maze_efficiency + maze_diagnosis
+        + maze_investigation + maze_traps + maze_scout + maze_unique
     )
+    penalty = penalty_rem + penalty_inv
+    total = positive - penalty
+
+    # Floor: investigation score if not fixed (partial credit)
+    if not system_healthy:
+        total = max(0.0, maze_investigation + maze_traps)
 
     return round(min(1.0, max(0.0, total)), 4)
