@@ -122,7 +122,7 @@ def compute_reward(
     correct_fix_used: bool = False,
     first_try_correct: bool = False,
     # V2.1 maze navigation params
-    optimal_steps: int = 2,
+    optimal_steps: int = 0,  # 0 = V1 mode (no remediation). >0 = V2 maze mode
     remediation_count: int = 0,
     observation_after_fix: int = 0,
     discovered_before_action: int = 0,
@@ -137,7 +137,9 @@ def compute_reward(
     Returns float in [0.0, 1.0].
     """
     # Detect V2 mode: if any remediation param is non-default, use V2 scoring
-    is_v2 = remediation_attempts > 0 or system_healthy or harm_count > 0
+    # V2 mode detection: V2 callers (verify_resolution) explicitly pass optimal_steps > 0
+    # V1 callers (submit_diagnosis) use the default optimal_steps=0
+    is_v2 = optimal_steps > 0
 
     # ══════════════════════════════════════════════════════════════════
     # TIER 1: DIAGNOSIS QUALITY (0.70)
@@ -377,72 +379,72 @@ def compute_reward(
     # 5. NO WASTED MOVES (0.10) — unique actions vs total
     # 6. DIAGNOSIS (0.15) — understood what they fixed
 
-    # ── 1. REACHED EXIT (0.30) ─────────────────────────────────────
-    maze_exit = 0.30 if system_healthy else 0.0
+    # ── 1. REACHED EXIT (0.45) ─────────────────────────────────────
+    maze_exit = 0.45 if system_healthy else 0.0
 
-    # ── 2. PATH EFFICIENCY (0.20) ──────────────────────────────────
+    # ── 2. PATH EFFICIENCY (0.15) ──────────────────────────────────
     # How many remediation steps vs optimal?
     if remediation_count == 0:
         maze_efficiency = 0.0  # Never tried to fix
     elif remediation_count <= optimal_steps:
-        maze_efficiency = 0.20  # At or below optimal
+        maze_efficiency = 0.15  # At or below optimal
     elif remediation_count <= optimal_steps * 2:
-        # Linear decay from optimal to 2x optimal
-        maze_efficiency = 0.20 * (1.0 - (remediation_count - optimal_steps) / optimal_steps)
+        maze_efficiency = 0.15 * (1.0 - (remediation_count - optimal_steps) / optimal_steps)
     elif remediation_count <= optimal_steps * 4:
-        # Slower decay from 2x to 4x
-        maze_efficiency = 0.20 * 0.25 * (1.0 - (remediation_count - optimal_steps * 2) / (optimal_steps * 2))
+        maze_efficiency = 0.15 * 0.25 * (1.0 - (remediation_count - optimal_steps * 2) / (optimal_steps * 2))
     else:
-        maze_efficiency = 0.0  # Way too many attempts
+        maze_efficiency = 0.0
 
-    # ── 3. TRAP AVOIDANCE (0.15) ───────────────────────────────────
-    # Start at 0.15, lose 0.05 per trap door triggered
-    maze_traps = max(0.0, 0.15 - harm_count * 0.05)
+    # ── 3. TRAP AVOIDANCE (0.10) ───────────────────────────────────
+    # Start at 0.10, lose 0.05 per trap door triggered
+    maze_traps = max(0.0, 0.10 - harm_count * 0.05)
 
-    # ── 4. SCOUTING (0.10) ─────────────────────────────────────────
+    # ── 4. SCOUTING (0.10) — only counts if agent actually remediated ──
     # 4a. Observe after fix: read_logs/check_metric after remediation (0.05)
     if remediation_count > 0:
         observe_ratio = min(1.0, observation_after_fix / remediation_count)
+        maze_observe = 0.05 * observe_ratio
     else:
-        observe_ratio = 0.0
-    maze_observe = 0.05 * observe_ratio
+        maze_observe = 0.0  # No remediation = no scouting credit
 
     # 4b. Discover before action: get_service_info before execute_runbook (0.05)
     if execute_runbook_count > 0:
         discover_ratio = min(1.0, discovered_before_action / execute_runbook_count)
+        maze_discover = 0.05 * discover_ratio
+    elif remediation_count > 0:
+        maze_discover = 0.05  # Used platform tools only (no execute_runbook needed)
     else:
-        discover_ratio = 1.0  # If no execute_runbook used, no penalty
-    maze_discover = 0.05 * discover_ratio
+        maze_discover = 0.0  # No remediation = no scouting credit
 
     maze_scout = maze_observe + maze_discover
 
     # ── 5. NO WASTED MOVES (0.10) ──────────────────────────────────
-    # Unique remediation calls / total remediation calls
     if remediation_count > 0:
         unique_ratio = min(1.0, unique_remediation_count / remediation_count)
+        maze_unique = 0.10 * unique_ratio
     else:
-        unique_ratio = 1.0
-    maze_unique = 0.10 * unique_ratio
+        maze_unique = 0.0  # No remediation = no credit
 
-    # ── 6. DIAGNOSIS (0.15) ────────────────────────────────────────
-    # Simplified from V1 — just check service + type + keywords
-    # NOT gated — agent may have fixed via exploratory path
-    sub_svc = submitted_service.strip().lower()
-    true_svc = true_root_service.strip().lower()
+    # ── 6. DIAGNOSIS (0.10) ────────────────────────────────────────
+    # GATED on system_healthy — if you didn't fix it, diagnosis is worthless
+    if system_healthy:
+        sub_svc = submitted_service.strip().lower()
+        true_svc = true_root_service.strip().lower()
 
-    diag_service = 0.08 if sub_svc == true_svc else (0.03 if services_graph and sub_svc in _get_neighbors(true_svc, services_graph) else 0.0)
+        diag_service = 0.05 if sub_svc == true_svc else (0.02 if services_graph and sub_svc in _get_neighbors(true_svc, services_graph) else 0.0)
 
-    diag_type = 0.04 if (submitted_failure_type.strip().lower() == true_failure_type.strip().lower() and submitted_failure_type.strip()) else 0.0
+        diag_type = 0.03 if (submitted_failure_type.strip().lower() == true_failure_type.strip().lower() and submitted_failure_type.strip()) else 0.0
 
-    # Keywords from explanation
-    submitted_text = submitted_root_cause.strip().lower()
-    if explanation_keywords and len(submitted_text) >= 10:
-        found = sum(1 for kw in explanation_keywords if kw.lower() in submitted_text)
-        diag_keywords = (found / len(explanation_keywords)) * 0.03
+        submitted_text = submitted_root_cause.strip().lower()
+        if explanation_keywords and len(submitted_text) >= 10:
+            found = sum(1 for kw in explanation_keywords if kw.lower() in submitted_text)
+            diag_keywords = (found / len(explanation_keywords)) * 0.02
+        else:
+            diag_keywords = 0.0
+
+        maze_diagnosis = diag_service + diag_type + diag_keywords
     else:
-        diag_keywords = 0.0
-
-    maze_diagnosis = diag_service + diag_type + diag_keywords
+        maze_diagnosis = 0.0  # Didn't fix it = diagnosis worthless
 
     # ══════════════════════════════════════════════════════════════════
     # TOTAL
