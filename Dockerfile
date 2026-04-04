@@ -22,7 +22,7 @@ RUN pip install --no-cache-dir \
     "python-dotenv"
 
 ENV PYTHONUNBUFFERED=1
-ENV PYTHONPATH="/app:$PYTHONPATH"
+ENV PYTHONPATH="/app"
 
 EXPOSE 8000
 
