@@ -56,6 +56,14 @@ class SREIncidentEnvironment(MCPEnvironment):
         self._current_reward: float = 0.0
         self._services_queried: set = set()
         self._tool_call_history: list = []
+        # V2.1 maze navigation tracking
+        self._discovered_services: set = set()          # get_service_info called on these
+        self._remediation_count: int = 0                 # total remediation tool calls
+        self._execute_runbook_count: int = 0             # execute_runbook calls specifically
+        self._discovered_before_action: int = 0          # execute_runbook where get_service_info was called first
+        self._observation_after_fix: int = 0             # read_logs right after a remediation
+        self._last_was_remediation: bool = False         # for observe-after-fix tracking
+        self._unique_remediation_keys: set = set()       # unique (tool, target, action) combos
         self._state = State(episode_id=str(uuid4()), step_count=0)
 
     def _has_remediation(self) -> bool:
@@ -116,6 +124,9 @@ class SREIncidentEnvironment(MCPEnvironment):
 
             self._services_queried.add(service)
             self._tool_call_history.append(("read_logs", service))
+            if self._last_was_remediation:
+                self._observation_after_fix += 1
+            self._last_was_remediation = False
 
             if self._log_gen is None:
                 return json.dumps({"error": "No episode active."})
@@ -167,6 +178,9 @@ class SREIncidentEnvironment(MCPEnvironment):
 
             self._services_queried.add(service)
             self._tool_call_history.append(("check_metric", service))
+            if self._last_was_remediation:
+                self._observation_after_fix += 1
+            self._last_was_remediation = False
 
             if self._metric_gen is None:
                 return json.dumps({"error": "No episode active."})
@@ -206,6 +220,8 @@ class SREIncidentEnvironment(MCPEnvironment):
 
             self._services_queried.add(service)
             self._tool_call_history.append(("get_service_info", service))
+            self._discovered_services.add(service.lower())
+            self._last_was_remediation = False
 
             if not self._state_machine:
                 return json.dumps({"error": "No episode active."})
@@ -424,6 +440,10 @@ class SREIncidentEnvironment(MCPEnvironment):
                             first_try_correct = True
                         break
 
+            # Get optimal_steps from remediation data
+            rem_data = failure.get("remediation", {})
+            optimal_steps = rem_data.get("optimal_steps", 2)
+
             reward = compute_reward(
                 submitted_root_cause=root_cause,
                 submitted_service=affected_service,
@@ -443,12 +463,18 @@ class SREIncidentEnvironment(MCPEnvironment):
                 true_causal_chain=failure.get("causal_chain", []),
                 optimal_queries=failure.get("optimal_queries", 10),
                 explanation_keywords=failure.get("explanation_keywords", []),
-                # V2 remediation params
+                # V2.1 maze navigation params
                 system_healthy=system_healthy,
                 remediation_attempts=remediation_attempts,
                 harm_count=harm_count,
                 correct_fix_used=correct_fix_used,
                 first_try_correct=first_try_correct,
+                optimal_steps=optimal_steps,
+                remediation_count=self._remediation_count,
+                observation_after_fix=self._observation_after_fix,
+                discovered_before_action=self._discovered_before_action,
+                execute_runbook_count=self._execute_runbook_count,
+                unique_remediation_count=len(self._unique_remediation_keys),
             )
 
             self._done = True
@@ -481,6 +507,24 @@ class SREIncidentEnvironment(MCPEnvironment):
             return budget_result
 
         self._tool_call_history.append((tool, service))
+
+        # Track maze navigation signals
+        self._remediation_count += 1
+        self._last_was_remediation = True
+
+        action_name = ""
+        if params and "_action" in params:
+            action_name = params["_action"]
+
+        # Track unique remediation calls
+        rem_key = f"{tool}:{service}:{action_name}".lower()
+        self._unique_remediation_keys.add(rem_key)
+
+        # Track discovery before execute_runbook
+        if tool == "execute_runbook":
+            self._execute_runbook_count += 1
+            if service.lower() in self._discovered_services:
+                self._discovered_before_action += 1
 
         if not self._state_machine:
             return json.dumps({"error": "No episode active."})
@@ -540,6 +584,14 @@ class SREIncidentEnvironment(MCPEnvironment):
         self._current_reward = 0.0
         self._services_queried = set()
         self._tool_call_history = []
+        # Reset V2.1 maze tracking
+        self._discovered_services = set()
+        self._remediation_count = 0
+        self._execute_runbook_count = 0
+        self._discovered_before_action = 0
+        self._observation_after_fix = 0
+        self._last_was_remediation = False
+        self._unique_remediation_keys = set()
         self._state = State(
             episode_id=episode_id or str(uuid4()), step_count=0
         )

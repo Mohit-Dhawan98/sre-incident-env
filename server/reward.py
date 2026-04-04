@@ -121,11 +121,18 @@ def compute_reward(
     harm_count: int = 0,
     correct_fix_used: bool = False,
     first_try_correct: bool = False,
+    # V2.1 maze navigation params
+    optimal_steps: int = 2,
+    remediation_count: int = 0,
+    observation_after_fix: int = 0,
+    discovered_before_action: int = 0,
+    execute_runbook_count: int = 0,
+    unique_remediation_count: int = 0,
 ) -> float:
-    """Compute ungameable + learnable reward for incident diagnosis + remediation.
+    """Compute reward for incident diagnosis + remediation maze navigation.
 
     V1 mode (no remediation data): Uses original 7-component scoring.
-    V2 mode (remediation data present): Uses 4-tier scoring with remediation.
+    V2 mode: Maze-based reward — how well did the agent navigate the state graph?
 
     Returns float in [0.0, 1.0].
     """
@@ -358,58 +365,95 @@ def compute_reward(
         return round(min(1.0, max(0.0, total)), 4)
 
     # ══════════════════════════════════════════════════════════════════
-    # V2 MODE: 4-TIER SCORING (investigation + diagnosis + remediation + harm)
+    # V2.1 MODE: MAZE NAVIGATION REWARD
     # ══════════════════════════════════════════════════════════════════
     #
-    # Tier 1 — Investigation Quality (0.15): breadth + efficiency
-    # Tier 2 — Diagnosis Accuracy (0.35): service + type + chain + keywords (GATED)
-    # Tier 3 — Remediation Effectiveness (0.40): system fixed + correct action + first try
-    # Tier 4 — Harm Avoidance (0.10): no trap doors + remediation efficiency
+    # Treat the incident as a maze. Score HOW the agent navigated.
+    #
+    # 1. REACHED EXIT (0.30) — did the system reach healthy?
+    # 2. PATH EFFICIENCY (0.20) — optimal steps vs actual
+    # 3. TRAP AVOIDANCE (0.15) — avoided worsened outcomes
+    # 4. SCOUTING (0.10) — observed after fix + discovered before action
+    # 5. NO WASTED MOVES (0.10) — unique actions vs total
+    # 6. DIAGNOSIS (0.15) — understood what they fixed
 
-    # Tier 1: Investigation (0.15) — rescale from V1 values
-    v2_investigation = min(0.15, (breadth_score / 0.07) * 0.08 + (efficiency_score / 0.08) * 0.07)
+    # ── 1. REACHED EXIT (0.30) ─────────────────────────────────────
+    maze_exit = 0.30 if system_healthy else 0.0
 
-    # Tier 2: Diagnosis (0.35) — rescale from V1 Tier 1 values
-    # service_score max 0.25 → scale to 0.15
-    v2_service = (service_score / 0.25) * 0.15 if service_score > 0 else 0.0
-    # type_score max 0.15 → scale to 0.08
-    v2_type = (type_score / 0.15) * 0.08 if type_score > 0 else 0.0
-    # chain_score max 0.15 → scale to 0.07
-    v2_chain = (chain_score / 0.15) * 0.07 if chain_score > 0 else 0.0
-    # semantic_score max 0.10 → scale to 0.05
-    v2_keywords = (semantic_score / 0.10) * 0.05 if semantic_score > 0 else 0.0
-    v2_diagnosis = v2_service + v2_type + v2_chain + v2_keywords
-
-    # Tier 3: Remediation (0.40)
-    # System fixed: 0.20
-    v2_system_fixed = 0.20 if system_healthy else 0.0
-    # Correct fix action used: 0.12
-    v2_correct_fix = 0.12 if correct_fix_used else 0.0
-    # First-try bonus: 0.08 (decays with attempts)
-    if first_try_correct:
-        v2_first_try = 0.08
-    elif correct_fix_used and remediation_attempts > 0:
-        v2_first_try = 0.08 * (1.0 / remediation_attempts)
+    # ── 2. PATH EFFICIENCY (0.20) ──────────────────────────────────
+    # How many remediation steps vs optimal?
+    if remediation_count == 0:
+        maze_efficiency = 0.0  # Never tried to fix
+    elif remediation_count <= optimal_steps:
+        maze_efficiency = 0.20  # At or below optimal
+    elif remediation_count <= optimal_steps * 2:
+        # Linear decay from optimal to 2x optimal
+        maze_efficiency = 0.20 * (1.0 - (remediation_count - optimal_steps) / optimal_steps)
+    elif remediation_count <= optimal_steps * 4:
+        # Slower decay from 2x to 4x
+        maze_efficiency = 0.20 * 0.25 * (1.0 - (remediation_count - optimal_steps * 2) / (optimal_steps * 2))
     else:
-        v2_first_try = 0.0
-    v2_remediation = v2_system_fixed + v2_correct_fix + v2_first_try
+        maze_efficiency = 0.0  # Way too many attempts
 
-    # Tier 4: Harm Avoidance (0.10)
-    # No trap doors: 0.06 (deduct 0.03 per harm event)
-    v2_no_harm = max(0.0, 0.06 - harm_count * 0.03)
-    # Remediation efficiency: 0.04 (fewer attempts = better)
-    if remediation_attempts <= 2:
-        v2_rem_efficiency = 0.04
-    elif remediation_attempts <= 5:
-        v2_rem_efficiency = 0.04 * (1.0 - (remediation_attempts - 2) / 6)
+    # ── 3. TRAP AVOIDANCE (0.15) ───────────────────────────────────
+    # Start at 0.15, lose 0.05 per trap door triggered
+    maze_traps = max(0.0, 0.15 - harm_count * 0.05)
+
+    # ── 4. SCOUTING (0.10) ─────────────────────────────────────────
+    # 4a. Observe after fix: read_logs/check_metric after remediation (0.05)
+    if remediation_count > 0:
+        observe_ratio = min(1.0, observation_after_fix / remediation_count)
     else:
-        v2_rem_efficiency = 0.0
-    v2_harm = v2_no_harm + v2_rem_efficiency
+        observe_ratio = 0.0
+    maze_observe = 0.05 * observe_ratio
 
-    total = v2_investigation + v2_diagnosis + v2_remediation + v2_harm
+    # 4b. Discover before action: get_service_info before execute_runbook (0.05)
+    if execute_runbook_count > 0:
+        discover_ratio = min(1.0, discovered_before_action / execute_runbook_count)
+    else:
+        discover_ratio = 1.0  # If no execute_runbook used, no penalty
+    maze_discover = 0.05 * discover_ratio
 
-    # Harm floor: if system worsened and not fixed, cap at 0.15
-    if not system_healthy and harm_count > 0:
-        total = min(total, 0.15)
+    maze_scout = maze_observe + maze_discover
+
+    # ── 5. NO WASTED MOVES (0.10) ──────────────────────────────────
+    # Unique remediation calls / total remediation calls
+    if remediation_count > 0:
+        unique_ratio = min(1.0, unique_remediation_count / remediation_count)
+    else:
+        unique_ratio = 1.0
+    maze_unique = 0.10 * unique_ratio
+
+    # ── 6. DIAGNOSIS (0.15) ────────────────────────────────────────
+    # Simplified from V1 — just check service + type + keywords
+    # NOT gated — agent may have fixed via exploratory path
+    sub_svc = submitted_service.strip().lower()
+    true_svc = true_root_service.strip().lower()
+
+    diag_service = 0.08 if sub_svc == true_svc else (0.03 if services_graph and sub_svc in _get_neighbors(true_svc, services_graph) else 0.0)
+
+    diag_type = 0.04 if (submitted_failure_type.strip().lower() == true_failure_type.strip().lower() and submitted_failure_type.strip()) else 0.0
+
+    # Keywords from explanation
+    submitted_text = submitted_root_cause.strip().lower()
+    if explanation_keywords and len(submitted_text) >= 10:
+        found = sum(1 for kw in explanation_keywords if kw.lower() in submitted_text)
+        diag_keywords = (found / len(explanation_keywords)) * 0.03
+    else:
+        diag_keywords = 0.0
+
+    maze_diagnosis = diag_service + diag_type + diag_keywords
+
+    # ══════════════════════════════════════════════════════════════════
+    # TOTAL
+    # ══════════════════════════════════════════════════════════════════
+    total = (
+        maze_exit
+        + maze_efficiency
+        + maze_traps
+        + maze_scout
+        + maze_unique
+        + maze_diagnosis
+    )
 
     return round(min(1.0, max(0.0, total)), 4)
