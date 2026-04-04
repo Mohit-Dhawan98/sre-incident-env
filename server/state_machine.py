@@ -67,22 +67,22 @@ class StateMachine:
         self.remediation_data = failure.get("remediation", {})
         self.service_info = scenario.get("service_info", {})
 
-        # Index actions for fast lookup
-        self._correct_actions = {}
-        self._partial_actions = {}
-        self._trap_actions = {}
+        # Index actions as lists (multiple actions can share tool+target)
+        self._correct_actions: Dict[str, List[Dict]] = {}
+        self._partial_actions: Dict[str, List[Dict]] = {}
+        self._trap_actions: Dict[str, List[Dict]] = {}
 
         for action in self.remediation_data.get("correct_actions", []):
             key = self._action_key(action["tool"], action["target"])
-            self._correct_actions[key] = action
+            self._correct_actions.setdefault(key, []).append(action)
 
         for action in self.remediation_data.get("partial_actions", []):
             key = self._action_key(action["tool"], action["target"])
-            self._partial_actions[key] = action
+            self._partial_actions.setdefault(key, []).append(action)
 
         for action in self.remediation_data.get("trap_actions", []):
             key = self._action_key(action["tool"], action["target"])
-            self._trap_actions[key] = action
+            self._trap_actions.setdefault(key, []).append(action)
 
     def _action_key(self, tool: str, target: str) -> str:
         """Create lookup key from tool name and target service."""
@@ -96,13 +96,57 @@ class StateMachine:
                 return info
         return None
 
+    def _extract_action_name(self, params: Dict) -> str:
+        """Extract the runbook action name from params."""
+        return params.get("_action", "").lower()
+
+    def _match_action_in_list(
+        self, actions: List[Dict], tool: str, params: Dict
+    ) -> Optional[Dict]:
+        """Find matching action from a list.
+
+        For execute_runbook: matches on _action name, then checks required golden params.
+        For platform tools (restart/rollback/scale): matches first entry (no action name needed).
+
+        Golden params define what's REQUIRED. If golden params is {} (empty),
+        the action name alone is sufficient — no param checking needed.
+        If golden defines specific key/value pairs, agent must provide those exact values.
+        """
+        agent_action = self._extract_action_name(params)
+
+        for action_def in actions:
+            golden_params = action_def.get("params", {})
+            golden_action = golden_params.get("_action", "").lower()
+
+            if tool == "execute_runbook":
+                # Must match action name
+                if not agent_action or not golden_action:
+                    continue
+                if agent_action != golden_action:
+                    continue
+                # Action name matches — check required params from golden
+                # Only params explicitly defined in golden (besides _action) must match
+                required = {k: v for k, v in golden_params.items() if k != "_action" and v is not None}
+                if not required:
+                    # No params required beyond action name — match!
+                    return action_def
+                if self._params_match(required, params):
+                    return action_def
+            else:
+                # Platform tools: first entry matches
+                return action_def
+
+        return None
+
     def process_remediation(
         self, tool: str, target: str, params: Optional[Dict] = None
     ) -> RemediationOutcome:
         """Process a remediation action and return the outcome.
 
-        Looks up (tool, target) in correct → partial → trap → default order.
-        For execute_runbook, the action name is part of params matching.
+        Matching strategy:
+        - For platform tools (restart/rollback/scale): match on tool + target service
+        - For execute_runbook: match on tool + target + action name (from params._action)
+        - Params beyond action name are matched loosely (golden must be subset of provided)
         """
         self.remediation_attempts += 1
         params = params or {}
@@ -120,35 +164,44 @@ class StateMachine:
 
         # 1. Check correct actions
         if key in self._correct_actions:
-            action = self._correct_actions[key]
-            if self._params_match(action.get("params", {}), params):
-                outcome = self._apply_action(action, "recovery")
+            matched = self._match_action_in_list(self._correct_actions[key], tool, params)
+            if matched:
+                outcome = self._apply_action(matched, "recovery")
                 self.remediation_history.append((tool, target, params, "recovery"))
                 return outcome
-            else:
-                # Right tool + target but wrong params → partial
-                return RemediationOutcome(
-                    outcome="partial",
-                    message=f"Action applied to {target} but parameters may not be optimal. Check get_service_info for valid configuration.",
-                    post_state="degraded" if self.system_state != "critical" else "critical",
-                )
 
         # 2. Check partial actions
         if key in self._partial_actions:
-            action = self._partial_actions[key]
-            outcome = self._apply_action(action, "partial")
-            self.remediation_history.append((tool, target, params, "partial"))
-            return outcome
+            matched = self._match_action_in_list(self._partial_actions[key], tool, params)
+            if matched:
+                outcome = self._apply_action(matched, "partial")
+                self.remediation_history.append((tool, target, params, "partial"))
+                return outcome
 
         # 3. Check trap actions
         if key in self._trap_actions:
-            action = self._trap_actions[key]
-            outcome = self._apply_action(action, "worsened")
-            self.harm_events.append((tool, action.get("message", "harmful action")))
-            self.remediation_history.append((tool, target, params, "worsened"))
-            return outcome
+            matched = self._match_action_in_list(self._trap_actions[key], tool, params)
+            if matched:
+                outcome = self._apply_action(matched, "worsened")
+                self.harm_events.append((tool, matched.get("message", "harmful action")))
+                self.remediation_history.append((tool, target, params, "worsened"))
+                return outcome
 
-        # 4. Default — no effect
+        # 4. For execute_runbook with unrecognized action: give helpful feedback
+        if tool == "execute_runbook":
+            agent_action = self._extract_action_name(params)
+            svc_info = self.get_service_info(target)
+            if svc_info and agent_action:
+                available = svc_info.get("available_actions", [])
+                if agent_action not in [a.lower() for a in available]:
+                    self.remediation_history.append((tool, target, params, "no_effect"))
+                    return RemediationOutcome(
+                        outcome="no_effect",
+                        message=f"Action '{agent_action}' is not available on {target}. Available actions: {', '.join(available[:5])}...",
+                        post_state=self.system_state,
+                    )
+
+        # 5. Default — no effect
         default = self.remediation_data.get("default_response", {})
         self.remediation_history.append((tool, target, params, "no_effect"))
         return RemediationOutcome(
