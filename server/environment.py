@@ -536,17 +536,6 @@ class SREIncidentEnvironment(MCPEnvironment):
 
         outcome = self._state_machine.process_remediation(tool, service, params)
 
-        # Per-step reward signal: tiny nudge for RL gradient across trajectory
-        # progress/recovery = positive, worsened = negative, no_effect = 0
-        if outcome.outcome == "recovery":
-            self._current_reward = 0.02
-        elif outcome.outcome == "progress":
-            self._current_reward = 0.01
-        elif outcome.outcome == "worsened":
-            self._current_reward = -0.01
-        else:
-            self._current_reward = 0.0
-
         return json.dumps({
             "action": tool,
             "target": service,
