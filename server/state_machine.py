@@ -1,15 +1,14 @@
-"""State machine for SRE incident remediation.
+"""State machine for SRE incident remediation — Graph-based traversal.
 
-Handles state transitions when agents take remediation actions.
-Looks up (tool, target, params) in scenario remediation data and returns outcomes.
+Each scenario defines a state GRAPH where:
+- Each state has its own set of valid actions
+- Actions transition to other states (forward, sideways, backward)
+- The agent navigates the maze to reach a resolved state
+- Post-logs/metrics are generated per transition
 
-States: "broken" → "degraded" | "critical" | "recovering" | "healthy"
-
-Every remediation action either:
-- Fixes the system (correct_action → "healthy")
-- Provides temporary relief (partial_action → "degraded")
-- Makes things worse (trap_action → "critical")
-- Has no effect (default → no state change)
+Supports two data formats:
+1. Graph format (V2.1): states dict with per-state actions
+2. Flat format (V2.0): correct_actions/partial_actions/trap_actions (auto-converted)
 """
 
 import json
@@ -25,9 +24,9 @@ class RemediationOutcome:
 
     def __init__(
         self,
-        outcome: str,  # "recovery", "partial", "worsened", "no_effect"
+        outcome: str,  # "recovery", "progress", "worsened", "no_effect"
         message: str,
-        post_state: str,  # "healthy", "degraded", "critical", "broken"
+        post_state: str,
         post_logs: Optional[List[Dict]] = None,
         post_metrics: Optional[Dict] = None,
     ):
@@ -39,10 +38,10 @@ class RemediationOutcome:
 
 
 class StateMachine:
-    """Manages system state transitions during incident remediation.
+    """Graph-based state machine for incident remediation.
 
-    Initialized with a scenario's remediation data. Processes remediation
-    actions and returns outcomes with new logs/metrics to overlay.
+    Each state has its own action table. Actions transition between states.
+    The agent navigates the graph to reach a resolved state.
     """
 
     def __init__(self, scenario: Dict[str, Any], base_time: datetime):
@@ -50,108 +49,177 @@ class StateMachine:
         self.base_time = base_time
         self.duration_minutes = scenario.get("duration_minutes", 15)
 
-        # Current system state
-        self.system_state = "broken"
+        # Load remediation data
+        failure = scenario.get("failure", {})
+        remediation = failure.get("remediation", {})
+        self.service_info = scenario.get("service_info", {})
 
-        # Remediation tracking
+        # Detect format and load states
+        if "states" in remediation:
+            # V2.1 graph format
+            self.states = remediation["states"]
+            self.initial_state = remediation.get("initial_state", "broken")
+            self.resolved_states = set(remediation.get("resolved_states", ["healthy"]))
+            self.optimal_steps = remediation.get("optimal_steps", 2)
+        else:
+            # V2.0 flat format — convert to graph
+            self.states = self._convert_flat_to_graph(remediation)
+            self.initial_state = "broken"
+            self.resolved_states = {"healthy"}
+            self.optimal_steps = remediation.get("optimal_steps", 1)
+
+        # Current state
+        self.system_state = self.initial_state
+
+        # Tracking
         self.remediation_history: List[Tuple[str, str, Dict, str]] = []
         self.harm_events: List[Tuple[str, str]] = []
         self.remediation_attempts = 0
-
-        # Post-remediation overlay data
         self.overlay_logs: List[LogEntry] = []
         self.overlay_metrics: Dict[str, Dict] = {}
+        self._action_time_offset = 0  # seconds after base_time + duration for overlay timestamps
 
-        # Load remediation data from scenario
-        failure = scenario.get("failure", {})
-        self.remediation_data = failure.get("remediation", {})
-        self.service_info = scenario.get("service_info", {})
+    def _convert_flat_to_graph(self, remediation: Dict) -> Dict:
+        """Convert V2.0 flat format to V2.1 graph format.
 
-        # Index actions as lists (multiple actions can share tool+target)
-        self._correct_actions: Dict[str, List[Dict]] = {}
-        self._partial_actions: Dict[str, List[Dict]] = {}
-        self._trap_actions: Dict[str, List[Dict]] = {}
+        Flat format has: correct_actions, partial_actions, trap_actions, default_response
+        Converts to a 2-state graph: broken → healthy (with traps → critical)
+        """
+        if not remediation:
+            return {
+                "broken": {
+                    "actions": [],
+                    "default": {"next_state": "broken", "outcome": "no_effect",
+                               "message": "No remediation data for this scenario."}
+                },
+                "healthy": {
+                    "is_resolved": True, "actions": [],
+                    "default": {"next_state": "healthy", "outcome": "no_effect",
+                               "message": "System is healthy."}
+                }
+            }
 
-        for action in self.remediation_data.get("correct_actions", []):
-            key = self._action_key(action["tool"], action["target"])
-            self._correct_actions.setdefault(key, []).append(action)
+        broken_actions = []
 
-        for action in self.remediation_data.get("partial_actions", []):
-            key = self._action_key(action["tool"], action["target"])
-            self._partial_actions.setdefault(key, []).append(action)
+        for ca in remediation.get("correct_actions", []):
+            broken_actions.append({
+                "tool": ca["tool"], "target": ca["target"],
+                "params": ca.get("params", {}),
+                "next_state": "healthy", "outcome": "recovery",
+                "message": ca.get("message", "System fixed."),
+                "post_logs": ca.get("post_logs", []),
+                "post_metrics": ca.get("post_metrics", {})
+            })
 
-        for action in self.remediation_data.get("trap_actions", []):
-            key = self._action_key(action["tool"], action["target"])
-            self._trap_actions.setdefault(key, []).append(action)
+        for pa in remediation.get("partial_actions", []):
+            broken_actions.append({
+                "tool": pa["tool"], "target": pa["target"],
+                "params": pa.get("params", {}),
+                "next_state": pa.get("post_state", "degraded"),
+                "outcome": "progress" if pa.get("post_state") == "healthy" else "no_effect",
+                "message": pa.get("message", "Partial effect."),
+                "post_logs": pa.get("post_logs", []),
+                "post_metrics": pa.get("post_metrics", {})
+            })
 
-    def _action_key(self, tool: str, target: str) -> str:
-        """Create lookup key from tool name and target service."""
-        return f"{tool.lower()}:{target.lower()}"
+        for ta in remediation.get("trap_actions", []):
+            broken_actions.append({
+                "tool": ta["tool"], "target": ta["target"],
+                "params": ta.get("params", {}),
+                "next_state": ta.get("post_state", "critical"),
+                "outcome": "worsened",
+                "message": ta.get("message", "Things got worse."),
+                "post_logs": ta.get("post_logs", []),
+                "post_metrics": ta.get("post_metrics", {})
+            })
+
+        default = remediation.get("default_response", {})
+
+        return {
+            "broken": {
+                "actions": broken_actions,
+                "default": {
+                    "next_state": default.get("post_state", "broken"),
+                    "outcome": "no_effect",
+                    "message": default.get("message", "No observable effect.")
+                }
+            },
+            "degraded": {
+                "actions": broken_actions,  # Same actions available from degraded
+                "default": {
+                    "next_state": "degraded", "outcome": "no_effect",
+                    "message": "System degraded. " + default.get("message", "")
+                }
+            },
+            "critical": {
+                "actions": broken_actions,  # Can still recover from critical
+                "default": {
+                    "next_state": "critical", "outcome": "no_effect",
+                    "message": "System critical. " + default.get("message", "")
+                }
+            },
+            "healthy": {
+                "is_resolved": True, "actions": [],
+                "default": {
+                    "next_state": "healthy", "outcome": "no_effect",
+                    "message": "System is healthy. No further action needed."
+                }
+            }
+        }
+
+    def _extract_action_name(self, params: Dict) -> str:
+        return params.get("_action", "").lower()
+
+    def _action_matches(self, action_def: Dict, tool: str, target: str, params: Dict) -> bool:
+        """Check if an action definition matches the agent's call."""
+        if action_def["tool"].lower() != tool.lower():
+            return False
+        if action_def["target"].lower() != target.lower():
+            return False
+
+        golden_params = action_def.get("params", {})
+
+        if tool == "execute_runbook":
+            agent_action = self._extract_action_name(params)
+            golden_action = self._extract_action_name(golden_params)
+
+            if not agent_action or not golden_action:
+                return False
+            if agent_action != golden_action:
+                return False
+
+            # Check required params beyond _action
+            required = {k: v for k, v in golden_params.items()
+                       if k != "_action" and v is not None}
+            if required:
+                for key, value in required.items():
+                    provided = params.get(key)
+                    if provided is None:
+                        return False
+                    if str(provided).lower() != str(value).lower():
+                        return False
+
+        return True
 
     def get_service_info(self, service: str) -> Optional[Dict]:
-        """Get service catalog entry for a service."""
-        # Case-insensitive lookup
+        """Get service catalog entry."""
         for svc_name, info in self.service_info.items():
             if svc_name.lower() == service.lower():
                 return info
         return None
 
-    def _extract_action_name(self, params: Dict) -> str:
-        """Extract the runbook action name from params."""
-        return params.get("_action", "").lower()
-
-    def _match_action_in_list(
-        self, actions: List[Dict], tool: str, params: Dict
-    ) -> Optional[Dict]:
-        """Find matching action from a list.
-
-        For execute_runbook: matches on _action name, then checks required golden params.
-        For platform tools (restart/rollback/scale): matches first entry (no action name needed).
-
-        Golden params define what's REQUIRED. If golden params is {} (empty),
-        the action name alone is sufficient — no param checking needed.
-        If golden defines specific key/value pairs, agent must provide those exact values.
-        """
-        agent_action = self._extract_action_name(params)
-
-        for action_def in actions:
-            golden_params = action_def.get("params", {})
-            golden_action = golden_params.get("_action", "").lower()
-
-            if tool == "execute_runbook":
-                # Must match action name
-                if not agent_action or not golden_action:
-                    continue
-                if agent_action != golden_action:
-                    continue
-                # Action name matches — check required params from golden
-                # Only params explicitly defined in golden (besides _action) must match
-                required = {k: v for k, v in golden_params.items() if k != "_action" and v is not None}
-                if not required:
-                    # No params required beyond action name — match!
-                    return action_def
-                if self._params_match(required, params):
-                    return action_def
-            else:
-                # Platform tools: first entry matches
-                return action_def
-
-        return None
-
     def process_remediation(
         self, tool: str, target: str, params: Optional[Dict] = None
     ) -> RemediationOutcome:
-        """Process a remediation action and return the outcome.
+        """Process a remediation action in the current state.
 
-        Matching strategy:
-        - For platform tools (restart/rollback/scale): match on tool + target service
-        - For execute_runbook: match on tool + target + action name (from params._action)
-        - Params beyond action name are matched loosely (golden must be subset of provided)
+        Looks up action in CURRENT STATE's action table.
+        Returns outcome and transitions to new state.
         """
         self.remediation_attempts += 1
         params = params or {}
 
-        # Check if target service exists in scenario
+        # Check if target service exists
         all_services = {s.lower() for s in self.scenario.get("services", {}).keys()}
         if target.lower() not in all_services:
             return RemediationOutcome(
@@ -160,86 +228,83 @@ class StateMachine:
                 post_state=self.system_state,
             )
 
-        key = self._action_key(tool, target)
+        # Get current state definition
+        state_def = self.states.get(self.system_state)
+        if not state_def:
+            return RemediationOutcome(
+                outcome="no_effect",
+                message=f"Unknown system state.",
+                post_state=self.system_state,
+            )
 
-        # 1. Check correct actions
-        if key in self._correct_actions:
-            matched = self._match_action_in_list(self._correct_actions[key], tool, params)
-            if matched:
-                outcome = self._apply_action(matched, "recovery")
-                self.remediation_history.append((tool, target, params, "recovery"))
-                return outcome
+        # Check if already resolved
+        if state_def.get("is_resolved"):
+            return RemediationOutcome(
+                outcome="no_effect",
+                message="System is already healthy. No further action needed.",
+                post_state=self.system_state,
+            )
 
-        # 2. Check partial actions
-        if key in self._partial_actions:
-            matched = self._match_action_in_list(self._partial_actions[key], tool, params)
-            if matched:
-                outcome = self._apply_action(matched, "partial")
-                self.remediation_history.append((tool, target, params, "partial"))
-                return outcome
+        # Find matching action in current state
+        for action_def in state_def.get("actions", []):
+            if self._action_matches(action_def, tool, target, params):
+                outcome_type = action_def.get("outcome", "no_effect")
+                next_state = action_def.get("next_state", self.system_state)
 
-        # 3. Check trap actions
-        if key in self._trap_actions:
-            matched = self._match_action_in_list(self._trap_actions[key], tool, params)
-            if matched:
-                outcome = self._apply_action(matched, "worsened")
-                self.harm_events.append((tool, matched.get("message", "harmful action")))
-                self.remediation_history.append((tool, target, params, "worsened"))
-                return outcome
+                # Track
+                self.system_state = next_state
+                self.remediation_history.append((tool, target, params, outcome_type))
+                if outcome_type == "worsened":
+                    self.harm_events.append((tool, action_def.get("message", "")))
 
-        # 4. For execute_runbook with unrecognized action: give helpful feedback
+                # Apply post-logs/metrics
+                self._apply_action_overlays(action_def)
+
+                return RemediationOutcome(
+                    outcome=outcome_type,
+                    message=action_def.get("message", "Action completed."),
+                    post_state=next_state,
+                    post_logs=action_def.get("post_logs", []),
+                    post_metrics=action_def.get("post_metrics", {}),
+                )
+
+        # No match — use default for this state
+        default = state_def.get("default", {})
+        default_state = default.get("next_state", self.system_state)
+        self.system_state = default_state
+        self.remediation_history.append((tool, target, params, "no_effect"))
+
+        # For execute_runbook with unknown action, give helpful info
         if tool == "execute_runbook":
             agent_action = self._extract_action_name(params)
             svc_info = self.get_service_info(target)
             if svc_info and agent_action:
                 available = svc_info.get("available_actions", [])
                 if agent_action not in [a.lower() for a in available]:
-                    self.remediation_history.append((tool, target, params, "no_effect"))
                     return RemediationOutcome(
                         outcome="no_effect",
-                        message=f"Action '{agent_action}' is not available on {target}. Available actions: {', '.join(available[:5])}...",
-                        post_state=self.system_state,
+                        message=f"Action '{agent_action}' not available on {target}. Check get_service_info for valid actions.",
+                        post_state=default_state,
                     )
 
-        # 5. Default — no effect
-        default = self.remediation_data.get("default_response", {})
-        self.remediation_history.append((tool, target, params, "no_effect"))
         return RemediationOutcome(
             outcome="no_effect",
-            message=default.get("message", f"Action had no observable effect on the incident."),
-            post_state=self.system_state,
+            message=default.get("message", "No observable effect on the incident."),
+            post_state=default_state,
         )
 
-    def _params_match(self, required: Dict, provided: Dict) -> bool:
-        """Check if provided params match required params.
+    def _apply_action_overlays(self, action_def: Dict) -> None:
+        """Generate overlay logs/metrics from an action's post-data."""
+        self._action_time_offset += 5  # Each action advances time slightly
+        action_time = self.base_time + timedelta(
+            minutes=self.duration_minutes,
+            seconds=self._action_time_offset
+        )
 
-        Empty required = any params accepted.
-        For execute_runbook, checks action name + nested params.
-        """
-        if not required:
-            return True
-        for key, value in required.items():
-            if value is None:
-                continue  # None = any value accepted for this key
-            provided_val = provided.get(key)
-            if provided_val is None:
-                return False
-            if str(provided_val).lower() != str(value).lower():
-                return False
-        return True
-
-    def _apply_action(self, action: Dict, outcome_type: str) -> RemediationOutcome:
-        """Apply an action definition and update state."""
-        post_state = action.get("post_state", self.system_state)
-        self.system_state = post_state
-
-        # Generate overlay logs
-        action_time = self.base_time + timedelta(minutes=self.duration_minutes)
-        for log_def in action.get("post_logs", []):
+        for log_def in action_def.get("post_logs", []):
             offset = log_def.get("offset_after_action_seconds", 5)
             ts = action_time + timedelta(seconds=offset)
 
-            # Render template with variables
             template = log_def.get("template", "")
             log_vars = log_def.get("log_vars", {})
             values = {"ts": ts.strftime("%Y-%m-%d %H:%M:%S")}
@@ -266,20 +331,14 @@ class StateMachine:
                 message=message,
             ))
 
-        # Store overlay metrics
-        for svc, metrics in action.get("post_metrics", {}).items():
+        for svc, metrics in action_def.get("post_metrics", {}).items():
             if svc not in self.overlay_metrics:
                 self.overlay_metrics[svc] = {}
             self.overlay_metrics[svc].update(metrics)
 
-        return RemediationOutcome(
-            outcome=outcome_type,
-            message=action.get("message", "Action completed."),
-            post_state=post_state,
-            post_logs=action.get("post_logs", []),
-            post_metrics=action.get("post_metrics", {}),
-        )
-
     def is_resolved(self) -> bool:
-        """Check if the system has been fixed."""
-        return self.system_state in ("healthy", "recovering")
+        """Check if the system has reached a resolved state."""
+        state_def = self.states.get(self.system_state, {})
+        if state_def.get("is_resolved"):
+            return True
+        return self.system_state in self.resolved_states
