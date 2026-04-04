@@ -395,9 +395,10 @@ def compute_reward(
     else:
         maze_efficiency = 0.0
 
-    # ── 3. TRAP AVOIDANCE (0.10) ───────────────────────────────────
-    # Start at 0.10, lose 0.05 per trap door triggered
-    maze_traps = max(0.0, 0.10 - harm_count * 0.05)
+    # ── 3. TRAP AVOIDANCE (0.15) ───────────────────────────────────
+    # Start at 0.15, lose 0.10 per trap door triggered
+    # 1 trap = 0.05, 2 traps = 0.00, 3+ = 0.00
+    maze_traps = max(0.0, 0.15 - harm_count * 0.10)
 
     # ── 4. SCOUTING (0.10) — only counts if agent actually remediated ──
     # 4a. Observe after fix: read_logs/check_metric after remediation (0.05)
