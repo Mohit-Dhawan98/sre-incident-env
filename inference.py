@@ -496,6 +496,26 @@ async def async_main() -> None:
             print(f"Difficulties: {difficulties} | Episodes per tier: {args.episodes}")
             print("=" * 60)
 
+        # Pre-selected scenarios for reproducible baselines (2 per tier)
+        BASELINE_SCENARIOS = {
+            "easy": [
+                "connection_leak_fd_exhaustion_001",
+                "circular_deadlock_service_dependency_001",
+            ],
+            "medium": [
+                "config_drift_gc_cascade_001",
+                "thundering_herd_deploy_cache_miss_001",
+            ],
+            "hard": [
+                "cpu_microcode_tsc_drift_001",
+                "numa_cross_socket_latency_001",
+            ],
+            "expert": [
+                "etcd_compaction_quota_alarm_001",
+                "cert_expiry_mutual_tls_001",
+            ],
+        }
+
         all_results: Dict[str, List[Dict[str, Any]]] = {}
 
         for difficulty in difficulties:
@@ -504,10 +524,13 @@ async def async_main() -> None:
             print(f"{'─' * 40}")
 
             tier_results = []
+            scenario_ids = BASELINE_SCENARIOS.get(difficulty, [None, None])
             for i in range(args.episodes):
-                print(f"\n  Episode {i+1}/{args.episodes}:")
+                sid = scenario_ids[i] if i < len(scenario_ids) else None
+                print(f"\n  Episode {i+1}/{args.episodes}" + (f" ({sid})" if sid else "") + ":")
                 result = await run_episode(
                     env, llm_client, model, tools, difficulty,
+                    scenario_id=sid,
                     env_base_url=env_base_url,
                 )
                 tier_results.append(result)
