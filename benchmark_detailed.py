@@ -282,6 +282,13 @@ async def main():
         optimal = s.get("failure", {}).get("remediation", {}).get("optimal_steps", 0)
         print(f"\n  {sid} ({diff}, {optimal}-step):", flush=True)
 
+        # Fresh connection per scenario — prevents WebSocket timeout carryover
+        try:
+            await env.close()
+        except Exception:
+            pass
+        env = SREIncidentEnv(base_url=space)
+
         t0 = time.time()
         r = await run_episode_detailed(env, llm, model, tools, diff, sid, space)
         elapsed = time.time() - t0
