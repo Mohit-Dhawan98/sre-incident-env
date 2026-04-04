@@ -1,0 +1,443 @@
+
+══════════════════════════════════════════════════════════════════════
+  EASY | circular_deadlock_service_dependency_001
+  Optimal: 2 steps
+══════════════════════════════════════════════════════════════════════
+
+  ┌─ [broken]
+  │  Circular deadlock: L1→L2→L3→L1. All services hung. lock_time
+  │  ├─ 🔵 restart_service(lock-manager)                      → deadlock_cleared
+  │  ├─ 🔵 execute_runbook(lock-manager, release_all_locks)   → deadlock_cleared
+  │  ├─ 💥 restart_service(service-a)                         → svc_crashed
+  │  ├─ 💥 restart_service(service-b)                         → svc_crashed
+  │  ├─ 💥 restart_service(service-c)                         → svc_crashed
+  │  ├─ 💥 scale_replicas(lock-manager)                       → svc_crashed
+  │  └─ 💥 execute_runbook(circuit-breaker-proxy, reset_all_circuits) → broken
+  │  └─ ⬜ (anything else)                                         → broken
+  └─
+
+  ┌─ [deadlock_cleared]
+  │  Deadlock broken. Services running. But lock_timeout=0 — dead
+  │  ├─ ✅ execute_runbook(lock-manager, update_config)       → healthy
+  │  ├─ ✅ execute_runbook(lock-manager, update_config)       → healthy
+  │  ├─ ✅ execute_runbook(lock-manager, enable_deadlock_detection) → healthy
+  │  ├─ 💥 execute_runbook(lock-manager, clear_lock_table)    → deadlock_cleared
+  │  ├─ ⬜ restart_service(service-a)                         → deadlock_cleared
+  │  └─ 💥 scale_replicas(lock-manager)                       → deadlock_cleared
+  │  └─ ⬜ (anything else)                                         → deadlock_cleared
+  └─
+
+  ┌─ [svc_crashed]
+  │  A victim service was restarted. Data lost. Deadlock still ac
+  │  ├─ 🔵 restart_service(lock-manager)                      → deadlock_cleared
+  │  ├─ 🔵 execute_runbook(lock-manager, release_all_locks)   → deadlock_cleared
+  │  ├─ 💥 restart_service(service-a)                         → svc_crashed
+  │  └─ 💥 scale_replicas(service-a)                          → svc_crashed
+  │  └─ ⬜ (anything else)                                         → svc_crashed
+  └─
+
+  ┌─ [healthy] ★ RESOLVED
+  │  Deadlock resolved. Prevention configured. System stable.
+  │  (terminal — all actions → healthy)
+  └─
+
+══════════════════════════════════════════════════════════════════════
+  EASY | connection_leak_fd_exhaustion_001
+  Optimal: 2 steps
+══════════════════════════════════════════════════════════════════════
+
+  ┌─ [broken]
+  │  api-gateway v8.1.0 leaking FDs. FD limit reached. Cannot acc
+  │  ├─ 🔵 rollback_deploy(api-gateway)                       → rolled_back
+  │  ├─ 🔵 restart_service(api-gateway)                       → restarted_leaking
+  │  ├─ 💥 scale_replicas(api-gateway)                        → scaled_leaking
+  │  └─ 💥 restart_service(config-service)                    → broken
+  │  └─ ⬜ (anything else)                                         → broken
+  └─
+
+  ┌─ [rolled_back]
+  │  v8.0.3 deployed. Leak stopped. But ~60K leaked FDs still ope
+  │  ├─ ✅ execute_runbook(api-gateway, close_idle_connections) → healthy
+  │  ├─ ✅ restart_service(api-gateway)                       → healthy
+  │  ├─ 💥 scale_replicas(api-gateway)                        → rolled_back
+  │  └─ 💥 restart_service(config-service)                    → rolled_back
+  │  └─ ⬜ (anything else)                                         → rolled_back
+  └─
+
+  ┌─ [restarted_leaking]
+  │  FDs cleared by restart but v8.1.0 still active. Leak resumin
+  │  ├─ ✅ rollback_deploy(api-gateway)                       → healthy
+  │  ├─ ⬜ restart_service(api-gateway)                       → restarted_leaking
+  │  └─ 💥 scale_replicas(api-gateway)                        → restarted_leaking
+  │  └─ ⬜ (anything else)                                         → restarted_leaking
+  └─
+
+  ┌─ [scaled_leaking]
+  │  Multiple instances all leaking. Worse than before.
+  │  ├─ 🔵 rollback_deploy(api-gateway)                       → rolled_back
+  │  └─ ⬜ restart_service(api-gateway)                       → scaled_leaking
+  │  └─ ⬜ (anything else)                                         → scaled_leaking
+  └─
+
+  ┌─ [healthy] ★ RESOLVED
+  │  v8.0.3 deployed. FDs cleared. System operational.
+  │  (terminal — all actions → healthy)
+  └─
+
+══════════════════════════════════════════════════════════════════════
+  EASY | connection_pool_leak_cascading_001
+  Optimal: 2 steps
+══════════════════════════════════════════════════════════════════════
+
+  ┌─ [broken]
+  │  warehouse-db pool exhausted. inventory-service v4.2.0 leakin
+  │  ├─ 🔵 rollback_deploy(inventory-service)                 → leak_fixed
+  │  ├─ 🔵 restart_service(warehouse-db)                      → pool_cleared
+  │  ├─ 💥 scale_replicas(warehouse-db)                       → scaled_broken
+  │  └─ 💥 restart_service(order-service)                     → broken
+  │  └─ ⬜ (anything else)                                         → broken
+  └─
+
+  ┌─ [leak_fixed]
+  │  inventory-service rolled back. Leak stopped. Pool draining s
+  │  ├─ ✅ execute_runbook(warehouse-db, terminate_idle_connections) → healthy
+  │  ├─ ✅ restart_service(warehouse-db)                      → healthy
+  │  ├─ 💥 restart_service(order-service)                     → leak_fixed
+  │  └─ 💥 scale_replicas(warehouse-db)                       → leak_fixed
+  │  └─ ⬜ (anything else)                                         → leak_fixed
+  └─
+
+  ┌─ [pool_cleared]
+  │  Pool cleared by restart. But inventory-service v4.2.0 still 
+  │  ├─ ✅ rollback_deploy(inventory-service)                 → healthy
+  │  └─ ⬜ restart_service(warehouse-db)                      → pool_cleared
+  │  └─ ⬜ (anything else)                                         → pool_cleared
+  └─
+
+  ┌─ [scaled_broken]
+  │  Multiple warehouse-db replicas, all pool-exhausted.
+  │  ├─ 🔵 rollback_deploy(inventory-service)                 → leak_fixed
+  │  └─ ⬜ restart_service(warehouse-db)                      → scaled_broken
+  │  └─ ⬜ (anything else)                                         → scaled_broken
+  └─
+
+  ┌─ [healthy] ★ RESOLVED
+  │  Pool healthy. Leak fixed. System operational.
+  │  (terminal — all actions → healthy)
+  └─
+
+══════════════════════════════════════════════════════════════════════
+  EASY | dns_misconfiguration_split_resolution_001
+  Optimal: 2 steps
+══════════════════════════════════════════════════════════════════════
+
+  ┌─ [broken]
+  │  CoreDNS stub zone pointing svc-beta.internal to stale IP. 50
+  │  ├─ 🔵 execute_runbook(dns-resolver, remove_stub_zone)    → stub_removed
+  │  ├─ ⬜ execute_runbook(dns-resolver, flush_dns_cache)     → broken
+  │  ├─ 💥 restart_service(dns-resolver)                      → dns_crashed
+  │  ├─ 💥 restart_service(svc-beta)                          → broken
+  │  └─ 💥 execute_runbook(svc-alpha, reset_circuit_breakers) → broken
+  │  └─ ⬜ (anything else)                                         → broken
+  └─
+
+  ┌─ [stub_removed]
+  │  Stub zone removed. New queries correct. Some clients still h
+  │  ├─ ✅ execute_runbook(dns-resolver, flush_dns_cache)     → healthy
+  │  ├─ ✅ execute_runbook(svc-alpha, force_dns_cache_flush)  → healthy
+  │  ├─ 💥 restart_service(svc-beta)                          → stub_removed
+  │  └─ 💥 restart_service(dns-resolver)                      → stub_removed
+  │  └─ ⬜ (anything else)                                         → stub_removed
+  └─
+
+  ┌─ [dns_crashed]
+  │  DNS was restarted. Brief total outage. Stub zone reloaded fr
+  │  ├─ 🔵 execute_runbook(dns-resolver, remove_stub_zone)    → stub_removed
+  │  └─ 💥 restart_service(dns-resolver)                      → dns_crashed
+  │  └─ ⬜ (anything else)                                         → dns_crashed
+  └─
+
+  ┌─ [healthy] ★ RESOLVED
+  │  Stub zone removed. DNS cache clean. All resolution correct.
+  │  (terminal — all actions → healthy)
+  └─
+
+══════════════════════════════════════════════════════════════════════
+  EASY | index_drop_query_degradation_001
+  Optimal: 2 steps
+══════════════════════════════════════════════════════════════════════
+
+  ┌─ [broken]
+  │  idx_events_user_created_at dropped. 2B-row table doing seq s
+  │  ├─ 🔵 execute_runbook(analytics-db, create_index)        → index_building
+  │  ├─ 🔵 execute_runbook(schema-migration-runner, rollback_last_migration) → wrong_index
+  │  ├─ 💥 restart_service(analytics-db)                      → db_cold
+  │  ├─ 💥 execute_runbook(analytics-db, drop_index)          → broken
+  │  └─ 💥 execute_runbook(scheduler-service, reschedule_failed_jobs) → broken
+  │  └─ ⬜ (anything else)                                         → broken
+  └─
+
+  ┌─ [index_building]
+  │  Index creation in progress on 2.1B rows. Queries improving a
+  │  ├─ ✅ execute_runbook(reporting-api, flush_query_plan_cache) → healthy
+  │  ├─ ✅ restart_service(reporting-api)                     → healthy
+  │  ├─ 💥 restart_service(analytics-db)                      → db_cold
+  │  └─ 💥 execute_runbook(scheduler-service, reschedule_failed_jobs) → index_building
+  │  └─ ⬜ (anything else)                                         → index_building
+  └─
+
+  ┌─ [wrong_index]
+  │  Rollback created _bak index with wrong column order. Queries
+  │  ├─ ✅ execute_runbook(analytics-db, create_index)        → healthy
+  │  ├─ 💥 restart_service(analytics-db)                      → wrong_index
+  │  └─ 💥 execute_runbook(analytics-db, drop_index)          → broken
+  │  └─ ⬜ (anything else)                                         → wrong_index
+  └─
+
+  ┌─ [db_cold]
+  │  DB restarted with cold buffers. Index still missing. Worse t
+  │  ├─ 🔵 execute_runbook(analytics-db, create_index)        → index_building
+  │  └─ 💥 restart_service(analytics-db)                      → db_cold
+  │  └─ ⬜ (anything else)                                         → db_cold
+  └─
+
+  ┌─ [healthy] ★ RESOLVED
+  │  Correct index created. Queries using index scan. Performance
+  │  (terminal — all actions → healthy)
+  └─
+
+══════════════════════════════════════════════════════════════════════
+  MEDIUM | cache_stampede_cold_start_001
+  Optimal: 3 steps
+══════════════════════════════════════════════════════════════════════
+
+  ┌─ [broken]
+  │  cache-cluster at 99% memory, evicting aggressively. product-
+  │  ├─ 🔵 scale_replicas(cache-cluster)                      → cache_scaled
+  │  ├─ 💥 execute_runbook(cache-cluster, flush_all)          → cache_wiped
+  │  ├─ 💥 restart_service(product-api)                       → broken
+  │  └─ 💥 scale_replicas(product-db)                         → broken
+  │  └─ ⬜ (anything else)                                         → broken
+  └─
+
+  ┌─ [cache_scaled]
+  │  Cache capacity increased. Evictions slowing. But product-api
+  │  ├─ 🔵 execute_runbook(product-api, warm_local_cache)     → caches_warm
+  │  └─ 💥 execute_runbook(cache-cluster, flush_all)          → cache_wiped
+  │  └─ ⬜ (anything else)                                         → cache_scaled
+  └─
+
+  ┌─ [caches_warm]
+  │  Cache scaled, L1 warm. But product-db still has backlog of s
+  │  ├─ ✅ execute_runbook(product-db, kill_long_queries)     → healthy
+  │  ├─ ✅ execute_runbook(product-db, expand_connection_pool) → healthy
+  │  ├─ 💥 execute_runbook(cache-cluster, flush_all)          → cache_wiped
+  │  └─ 💥 restart_service(product-api)                       → cache_scaled
+  │  └─ ⬜ (anything else)                                         → caches_warm
+  └─
+
+  ┌─ [cache_wiped]
+  │  Cache wiped by FLUSHALL. Worse than initial incident. ALL re
+  │  ├─ 🔵 scale_replicas(cache-cluster)                      → cache_scaled
+  │  └─ 💥 restart_service(product-db)                        → cache_wiped
+  │  └─ ⬜ (anything else)                                         → cache_wiped
+  └─
+
+  ┌─ [healthy] ★ RESOLVED
+  │  Cache operational. L1 warm. DB at normal load. System health
+  │  (terminal — all actions → healthy)
+  └─
+
+══════════════════════════════════════════════════════════════════════
+  MEDIUM | config_drift_gc_cascade_001
+  Optimal: 3 steps
+══════════════════════════════════════════════════════════════════════
+
+  ┌─ [broken]
+  │  session-db statement_timeout=300000ms (should be 30000). use
+  │  ├─ 🔵 execute_runbook(session-db, update_config)         → config_fixed
+  │  ├─ ⬜ execute_runbook(session-db, show_config_diff)      → broken
+  │  ├─ 💥 restart_service(session-db)                        → db_crashed
+  │  ├─ 💥 execute_runbook(session-db, reload_config_file)    → broken
+  │  ├─ 💥 restart_service(user-service)                      → broken
+  │  └─ 💥 execute_runbook(analytics-collector, pause_pipeline) → broken
+  │  └─ ⬜ (anything else)                                         → broken
+  └─
+
+  ┌─ [config_fixed]
+  │  statement_timeout restored to 30000ms. But existing connecti
+  │  ├─ 🔵 execute_runbook(session-db, terminate_idle_connections) → pool_cleared
+  │  └─ 💥 restart_service(session-db)                        → config_fixed_db_crashed
+  │  └─ ⬜ (anything else)                                         → config_fixed
+  └─
+
+  ┌─ [pool_cleared]
+  │  Config fixed. Old connections cleared. But user-service Hika
+  │  ├─ ✅ execute_runbook(user-service, close_idle_db_connections) → healthy
+  │  ├─ ✅ restart_service(user-service)                      → healthy
+  │  └─ 💥 restart_service(session-db)                        → pool_cleared
+  │  └─ ⬜ (anything else)                                         → pool_cleared
+  └─
+
+  ┌─ [db_crashed]
+  │  session-db restarted with bad config. All sessions lost.
+  │  ├─ 🔵 execute_runbook(session-db, update_config)         → config_fixed
+  │  └─ 💥 restart_service(user-service)                      → db_crashed
+  │  └─ ⬜ (anything else)                                         → db_crashed
+  └─
+
+  ┌─ [config_fixed_db_crashed]
+  │  Config fixed but DB was restarted unnecessarily. Sessions lo
+  │  ├─ ✅ execute_runbook(user-service, close_idle_db_connections) → healthy
+  │  ├─ ✅ restart_service(user-service)                      → healthy
+  │  └─ 💥 restart_service(session-db)                        → config_fixed_db_crashed
+  │  └─ ⬜ (anything else)                                         → config_fixed_db_crashed
+  └─
+
+  ┌─ [healthy] ★ RESOLVED
+  │  Config restored. Pool healthy. Connections using 30s timeout
+  │  (terminal — all actions → healthy)
+  └─
+
+══════════════════════════════════════════════════════════════════════
+  MEDIUM | page_cache_thrashing_colocation_001
+  Optimal: 3 steps
+══════════════════════════════════════════════════════════════════════
+
+  ┌─ [broken]
+  │  indexer-service and analytics-engine competing for page cach
+  │  ├─ 🔵 execute_runbook(analytics-engine, drain_traffic)   → scan_stopped
+  │  ├─ 💥 execute_runbook(page-cache-mgr, flush_page_cache)  → cache_flushed
+  │  ├─ 💥 restart_service(indexer-service)                   → broken
+  │  └─ 💥 scale_replicas(indexer-service)                    → broken
+  │  └─ ⬜ (anything else)                                         → broken
+  └─
+
+  ┌─ [scan_stopped]
+  │  analytics-engine drained. Indexer recovering. But analytics 
+  │  ├─ 🔵 execute_runbook(indexer-service, warm_index_pages) → index_warm
+  │  ├─ ✅ execute_runbook(analytics-engine, relocate_to_different_host) → healthy
+  │  ├─ 💥 execute_runbook(page-cache-mgr, flush_page_cache)  → cache_flushed
+  │  └─ 💥 restart_service(indexer-service)                   → scan_stopped
+  │  └─ ⬜ (anything else)                                         → scan_stopped
+  └─
+
+  ┌─ [index_warm]
+  │  Scans stopped. Index pages warm. analytics-engine still offl
+  │  ├─ ✅ execute_runbook(analytics-engine, relocate_to_different_host) → healthy
+  │  └─ 💥 restart_service(analytics-engine)                  → broken
+  │  └─ ⬜ (anything else)                                         → index_warm
+  └─
+
+  ┌─ [cache_flushed]
+  │  Page cache was flushed. Both services re-faulting. Worse tha
+  │  ├─ 🔵 execute_runbook(analytics-engine, drain_traffic)   → scan_stopped
+  │  └─ 💥 restart_service(indexer-service)                   → cache_flushed
+  │  └─ ⬜ (anything else)                                         → cache_flushed
+  └─
+
+  ┌─ [healthy] ★ RESOLVED
+  │  Services on separate hosts. No page cache contention. Both o
+  │  (terminal — all actions → healthy)
+  └─
+
+══════════════════════════════════════════════════════════════════════
+  MEDIUM | thundering_herd_deploy_cache_miss_001
+  Optimal: 3 steps
+══════════════════════════════════════════════════════════════════════
+
+  ┌─ [broken]
+  │  CDN cache purged. 100% miss. edge-api overwhelmed. origin-db
+  │  ├─ 🔵 scale_replicas(edge-api)                           → origin_scaled
+  │  ├─ 💥 restart_service(cdn)                               → cdn_repurged
+  │  ├─ 💥 restart_service(origin-db)                         → broken
+  │  └─ 💥 execute_runbook(cdn, invalidate_cache)             → broken
+  │  └─ ⬜ (anything else)                                         → broken
+  └─
+
+  ┌─ [origin_scaled]
+  │  edge-api scaled. Origin handling load. But CDN warming slowl
+  │  ├─ 🔵 execute_runbook(cdn, restrict_origin_pull_rate)    → rate_limited
+  │  ├─ 💥 restart_service(cdn)                               → cdn_repurged
+  │  └─ 💥 execute_runbook(cdn, invalidate_cache)             → broken
+  │  └─ ⬜ (anything else)                                         → origin_scaled
+  └─
+
+  ┌─ [rate_limited]
+  │  Scaled + rate-limited. CDN warming controlled. But origin-db
+  │  ├─ ✅ execute_runbook(origin-db, kill_long_queries)      → healthy
+  │  ├─ ✅ execute_runbook(origin-db, expand_connection_pool) → healthy
+  │  └─ 💥 restart_service(origin-db)                         → rate_limited
+  │  └─ ⬜ (anything else)                                         → rate_limited
+  └─
+
+  ┌─ [cdn_repurged]
+  │  CDN was restarted causing re-purge. All warming progress los
+  │  ├─ 🔵 scale_replicas(edge-api)                           → origin_scaled
+  │  └─ 💥 restart_service(cdn)                               → cdn_repurged
+  │  └─ ⬜ (anything else)                                         → cdn_repurged
+  └─
+
+  ┌─ [healthy] ★ RESOLVED
+  │  Edge scaled. CDN warming. DB backlog cleared. System recover
+  │  (terminal — all actions → healthy)
+  └─
+
+══════════════════════════════════════════════════════════════════════
+  MEDIUM | wal_archive_disk_full_h002
+  Optimal: 2 steps
+══════════════════════════════════════════════════════════════════════
+
+  ┌─ [broken]
+  │  wal-archiver cleanup cron failing (perms error). Archive vol
+  │  ├─ 🔵 execute_runbook(wal-archiver, fix_archive_permissions) → perms_fixed
+  │  ├─ ⬜ execute_runbook(wal-archiver, cleanup_archive)     → broken
+  │  ├─ ⬜ restart_service(wal-archiver)                      → broken
+  │  ├─ 💥 restart_service(postgres-primary)                  → postgres_crashed
+  │  ├─ 💥 execute_runbook(postgres-primary, force_checkpoint) → broken
+  │  └─ ⬜ execute_runbook(write-api, pause_writes)           → broken
+  │  └─ ⬜ (anything else)                                         → broken
+  └─
+
+  ┌─ [perms_fixed]
+  │  Permissions fixed on /archive/old/. Archive still at 100%. C
+  │  ├─ ✅ execute_runbook(wal-archiver, cleanup_archive)     → healthy
+  │  ├─ ✅ restart_service(wal-archiver)                      → healthy
+  │  ├─ 💥 restart_service(postgres-primary)                  → perms_fixed_pg_crashed
+  │  └─ ⬜ execute_runbook(wal-archiver, fix_archive_permissions) → perms_fixed
+  │  └─ ⬜ (anything else)                                         → perms_fixed
+  └─
+
+  ┌─ [postgres_crashed]
+  │  postgres in crash recovery. Archive permissions still broken
+  │  ├─ 🔵 execute_runbook(wal-archiver, fix_archive_permissions) → perms_fixed_pg_crashed
+  │  └─ 💥 restart_service(postgres-primary)                  → postgres_crashed
+  │  └─ ⬜ (anything else)                                         → postgres_crashed
+  └─
+
+  ┌─ [perms_fixed_pg_crashed]
+  │  Permissions fixed. postgres recovering from crash. Archive s
+  │  ├─ ✅ execute_runbook(wal-archiver, cleanup_archive)     → healthy
+  │  ├─ ✅ restart_service(wal-archiver)                      → healthy
+  │  └─ 💥 restart_service(postgres-primary)                  → perms_fixed_pg_crashed
+  │  └─ ⬜ (anything else)                                         → perms_fixed_pg_crashed
+  └─
+
+  ┌─ [healthy] ★ RESOLVED
+  │  Archive cleaned. WAL archiving active. postgres read-write. 
+  │  (terminal — all actions → healthy)
+  └─
+
+⏭  hard   | cert_expiry_mutual_tls_001 (flat format — not yet converted)
+
+⏭  hard   | cpu_microcode_tsc_drift_001 (flat format — not yet converted)
+
+⏭  hard   | jvm_metaspace_classloader_leak_001 (flat format — not yet converted)
+
+⏭  hard   | kafka_partition_rebalance_storm_001 (flat format — not yet converted)
+
+⏭  hard   | numa_cross_socket_latency_001 (flat format — not yet converted)
+
+⏭  expert | etcd_compaction_quota_alarm_001 (flat format — not yet converted)
+
+⏭  expert | kernel_tcp_rmem_silent_drop_001 (flat format — not yet converted)
