@@ -1,26 +1,24 @@
-"""Reward computation for SRE incident diagnosis — V5 (signal-quality first).
+"""Reward computation for SRE incident diagnosis + remediation.
 
-Design principles:
-  - Weight proportional to signal quality. Clean signals get more weight.
-  - Tier 1 components GATED on correct service ID (wrong service = 0 on Tier 1).
-  - Tier 2 NOT gated — provides RL gradient even on failed episodes.
-  - All signals are deterministic. No embedding models needed.
-  - Explanation uses keyword checklist (golden data), not free-text similarity.
+Two modes:
+  V1 (diagnosis only): 7-component scoring for investigation quality.
+  V2 (maze navigation): 6 rewards + 2 capped penalties for full SRE lifecycle.
 
-Reward components (7, totaling 1.0):
+V2 Reward — 4 pillars + 2 penalties:
 
-  Tier 1 — Did you solve it? (0.65):
-    1. Root service ID        (0.25): exact match + adjacency(0.08) partial
-    2. Failure type match     (0.15): exact match from taxonomy, GATED
-    3. Causal chain validity   (0.15): F1 vs golden chain, GATED
-    4. Explanation keywords    (0.10): golden keyword checklist, GATED
+  REWARDS (positive, sum to 1.0 on perfect run):
+    1. Reached Exit     (0.35): binary — did you fix the system?
+    2. Clean Path       (0.25): ratio — optimal_steps / actual_remediation
+    3. Diagnosis        (0.15): service + type + keywords (gated on exit)
+    4. SRE Discipline   (0.10): observe-after-fix + discover-before-action
+    5. Trap Avoidance   (0.10): full credit if no traps, -0.05 per trap
+    6. No Repeats       (0.05): unique_actions / total_actions
 
-  Tier 2 — How did you solve it? (0.35):
-    5. Query efficiency        (0.20): actual vs optimal queries, NOT gated
-    6. Waste penalty           (0.08): duplicates/tunnel vision, NOT gated
-    7. Investigation breadth   (0.07): queried causal chain services, NOT gated
+  PENALTIES (subtractive, capped):
+    A. Wasted Remediation  (-0.02/step beyond optimal, cap -0.15)
+    B. Wasted Investigation(-0.005/step beyond budget, cap -0.10)
 
-All deterministic. No model loading. Tests run in <2s.
+All deterministic. No model loading. Perfect run = 1.0.
 """
 
 from typing import Any, Dict, List, Set, Tuple
@@ -370,34 +368,31 @@ def compute_reward(
     # V2.1 MODE: MAZE NAVIGATION REWARD
     # ══════════════════════════════════════════════════════════════════
     #
-    # 8 components summing to 1.0. Mix of positive rewards AND penalties.
-    # Positive components reward good behavior. Penalties punish waste/harm.
-    # Perfect run = 1.0. Harder scenarios naturally score lower because
-    # more steps = more chances for waste and lower efficiency.
+    # 6 positive components (sum to 1.0) + 2 capped penalties.
+    # Perfect run = 1.0. Penalties subtract but are capped.
     #
-    # Positive (max 1.0 if perfect):
-    #   1. REACHED EXIT        (0.30) — fixed the system
-    #   2. PATH EFFICIENCY     (0.20) — optimal steps vs actual (ratio-based)
-    #   3. DIAGNOSIS           (0.15) — understood what was fixed (gated on exit)
-    #   4. INVESTIGATION       (0.10) — targeted investigation quality
-    #   5. TRAP AVOIDANCE      (0.10) — avoided worsened outcomes
-    #   6. SCOUTING            (0.05) — discovered before action + observed after
-    #   7. NO WASTED MOVES     (0.05) — unique actions vs total
+    # REWARDS (what good looks like):
+    #   1. REACHED EXIT        (0.35) — fixed the system
+    #   2. CLEAN PATH          (0.25) — optimal_steps / actual (ratio)
+    #   3. DIAGNOSIS           (0.15) — root cause understanding (gated on exit)
+    #   4. SRE DISCIPLINE      (0.10) — investigate before, observe after
+    #   5. TRAP AVOIDANCE      (0.10) — didn't make things worse
+    #   6. NO REPEATS          (0.05) — unique actions / total
     #
-    # Penalty (subtractive):
-    #   8. STEP PENALTY        (-0.02 per remediation step beyond optimal)
-    #                          (-0.005 per investigation step beyond budget)
+    # PENALTIES (capped deductions):
+    #   A. WASTED REMEDIATION  (-0.02/step beyond optimal, capped -0.15)
+    #   B. WASTED INVESTIGATION(-0.005/step beyond budget, capped -0.10)
 
-    # ── 1. REACHED EXIT (0.30) ─────────────────────────────────────
-    maze_exit = 0.30 if system_healthy else 0.0
+    # ── 1. REACHED EXIT (0.35) ─────────────────────────────────────
+    maze_exit = 0.35 if system_healthy else 0.0
 
-    # ── 2. PATH EFFICIENCY (0.20) ──────────────────────────────────
-    # Ratio-based: optimal / actual. Full credit at optimal, decays linearly.
+    # ── 2. CLEAN PATH (0.25) ──────────────────────────────────────
+    # Ratio: optimal / actual. Full credit at optimal, decays smoothly.
     if remediation_count == 0:
         maze_efficiency = 0.0
     else:
         ratio = min(1.0, optimal_steps / remediation_count)
-        maze_efficiency = 0.20 * ratio
+        maze_efficiency = 0.25 * ratio
 
     # ── 3. DIAGNOSIS (0.15) — gated on system_healthy ──────────────
     if system_healthy:
@@ -419,60 +414,59 @@ def compute_reward(
     else:
         maze_diagnosis = 0.0
 
-    # ── 4. INVESTIGATION QUALITY (0.10) ────────────────────────────
-    maze_investigation = min(0.10,
-        (breadth_score / 0.07) * 0.05 + (efficiency_score / 0.08) * 0.05
-    ) if (breadth_score + efficiency_score) > 0 else 0.0
-
-    # ── 5. TRAP AVOIDANCE (0.10) ───────────────────────────────────
-    # Full credit for zero traps. Lose 0.05 per trap. Rewards careful navigation.
-    maze_traps = max(0.0, 0.10 - harm_count * 0.05)
-
-    # ── 6. SCOUTING (0.05) ────────────────────────────────────────
-    maze_scout = 0.0
+    # ── 4. SRE DISCIPLINE (0.10) ─────────────────────────────────────
+    # Good SRE practice: investigate before acting, observe outcomes after.
+    maze_discipline = 0.0
     if remediation_count > 0:
+        # Observe after fix: read_logs after remediation (0.05)
         observe_ratio = min(1.0, observation_after_fix / remediation_count)
-        maze_scout += 0.025 * observe_ratio
+        maze_discipline += 0.05 * observe_ratio
+        # Discover before action: get_service_info before execute_runbook (0.05)
         if execute_runbook_count > 0:
             discover_ratio = min(1.0, discovered_before_action / execute_runbook_count)
-            maze_scout += 0.025 * discover_ratio
+            maze_discipline += 0.05 * discover_ratio
         else:
-            maze_scout += 0.025
+            maze_discipline += 0.05  # Platform tools only, no discovery needed
 
-    # ── 7. NO WASTED MOVES (0.05) ──────────────────────────────────
-    # Rewards unique actions. Penalizes repeating same (tool, target, action).
+    # ── 5. TRAP AVOIDANCE (0.10) ───────────────────────────────────
+    # Full credit for zero traps. Lose 0.05 per trap. Floor 0.
+    maze_traps = max(0.0, 0.10 - harm_count * 0.05)
+
+    # ── 6. NO REPEATS (0.05) ──────────────────────────────────────
+    # Rewards trying different actions. Penalizes brute-forcing same call.
     if remediation_count > 0:
         unique_ratio = min(1.0, unique_remediation_count / remediation_count)
         maze_unique = 0.05 * unique_ratio
     else:
         maze_unique = 0.0
 
-    # ── 8. STEP PENALTY (subtractive) ──────────────────────────────
-    # -0.02 per excess remediation step beyond optimal
+    # ── PENALTY A: WASTED REMEDIATION ──────────────────────────────
+    # -0.02 per excess step beyond optimal. Capped at -0.15.
     excess_rem = max(0, remediation_count - optimal_steps)
-    penalty_rem = excess_rem * 0.02
+    penalty_rem = min(0.15, excess_rem * 0.02)
 
-    # -0.005 per excess investigation step beyond reasonable budget
+    # ── PENALTY B: WASTED INVESTIGATION ────────────────────────────
+    # Budget = optimal_steps * 4 + 8. -0.005 per excess step. Capped at -0.10.
     total_investigative = len([
         (t, a) for t, a in tool_call_history
         if t in ("read_logs", "check_metric", "get_service_info")
     ])
     reasonable_budget = optimal_steps * 4 + 8
     excess_inv = max(0, total_investigative - reasonable_budget)
-    penalty_inv = excess_inv * 0.005
+    penalty_inv = min(0.10, excess_inv * 0.005)
 
     # ══════════════════════════════════════════════════════════════════
     # TOTAL
     # ══════════════════════════════════════════════════════════════════
     positive = (
         maze_exit + maze_efficiency + maze_diagnosis
-        + maze_investigation + maze_traps + maze_scout + maze_unique
+        + maze_discipline + maze_traps + maze_unique
     )
     penalty = penalty_rem + penalty_inv
     total = positive - penalty
 
-    # Floor: investigation score if not fixed (partial credit)
+    # Floor: partial credit if not fixed (trap avoidance + small base)
     if not system_healthy:
-        total = max(0.0, maze_investigation + maze_traps)
+        total = max(0.0, maze_traps + 0.05)
 
     return round(min(1.0, max(0.0, total)), 4)
