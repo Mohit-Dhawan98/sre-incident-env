@@ -21,3 +21,9 @@ scenarios/incidents_extra.jsonl
 outputs/
 benchmarks/
 *.log
+scenarios/incidents.jsonl
+scenarios/graph_visualization*.txt
+scenarios/difficulty_calibration.md
+scenarios/schema.md
+benchmark_detailed.py
+uv.lock
