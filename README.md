@@ -85,6 +85,21 @@ Each scenario defines a directed graph of system states. The agent navigates:
 
 The agent discovers direction by **observing** (read_logs after each action). The environment never says "you progressed" — it shows system state changes.
 
+## Action & Observation Spaces
+
+**Action** (`CallToolAction`): Agent calls one of 10 MCP tools per step. Each tool has typed parameters (service name, metric name, action name, JSON params).
+
+**Observation** (`Observation`):
+- `done: bool` — episode finished?
+- `reward: float` — 0.0 during episode, 0.0-1.0 on verify_resolution
+- `metadata.logs: List[LogEntry]` — `{timestamp, service, level, message}`
+- `metadata.metric_series: List[MetricPoint]` — `{timestamp, value}`
+- `metadata.services: List[str]` — service names
+- `metadata.message: str` — action outcome description, system state feedback
+- `metadata.outcome: str` — remediation result (progress/recovery/no_effect/worsened)
+
+**State**: `episode_id`, `step_count`, `scenario_id`, `difficulty`, `queries_used`, `query_budget`
+
 ## Reward Function
 
 ### 6 Rewards + 2 Capped Penalties (perfect = 1.0)
