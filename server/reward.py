@@ -379,8 +379,16 @@ def compute_reward(
     # 5. NO WASTED MOVES (0.10) — unique actions vs total
     # 6. DIAGNOSIS (0.15) — understood what they fixed
 
-    # ── 1. REACHED EXIT (0.45) ─────────────────────────────────────
-    maze_exit = 0.45 if system_healthy else 0.0
+    # ── 0. INVESTIGATION QUALITY (0.10) ────────────────────────────
+    # Reuse V1 breadth + efficiency scores (already computed above)
+    # breadth_score max 0.07, efficiency_score max 0.08 → scale to 0.10
+    # Rewards targeted investigation, penalizes spray-and-pray
+    maze_investigation = min(0.10,
+        (breadth_score / 0.07) * 0.05 + (efficiency_score / 0.08) * 0.05
+    ) if (breadth_score + efficiency_score) > 0 else 0.0
+
+    # ── 1. REACHED EXIT (0.35) ─────────────────────────────────────
+    maze_exit = 0.35 if system_healthy else 0.0
 
     # ── 2. PATH EFFICIENCY (0.15) ──────────────────────────────────
     # How many remediation steps vs optimal?
@@ -422,7 +430,7 @@ def compute_reward(
     # ── 5. NO WASTED MOVES (0.10) ──────────────────────────────────
     if remediation_count > 0:
         unique_ratio = min(1.0, unique_remediation_count / remediation_count)
-        maze_unique = 0.10 * unique_ratio
+        maze_unique = 0.05 * unique_ratio
     else:
         maze_unique = 0.0  # No remediation = no credit
 
@@ -451,7 +459,8 @@ def compute_reward(
     # TOTAL
     # ══════════════════════════════════════════════════════════════════
     total = (
-        maze_exit
+        maze_investigation
+        + maze_exit
         + maze_efficiency
         + maze_traps
         + maze_scout
