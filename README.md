@@ -103,29 +103,25 @@ The agent discovers direction by **observing** (read_logs after each action). Th
 
 ## Reward Function
 
-### 6 Rewards + 2 Capped Penalties (perfect = 1.0)
+### 6 Components, 3 Dimensions, No Double Counting (perfect = 1.0)
 
-| # | Component | Weight | What it measures |
-|---|-----------|--------|-----------------|
-| 1 | Reached Exit | 0.35 | Binary: did the system reach healthy? |
-| 2 | Clean Path | 0.25 | Ratio: optimal_steps / actual_remediation |
-| 3 | Diagnosis | 0.15 | Service + type + keywords (gated on exit) |
-| 4 | SRE Discipline | 0.10 | Observe-after-fix + discover-before-action |
-| 5 | Trap Avoidance | 0.10 | Full credit if no traps, -0.05 per trap |
-| 6 | No Repeats | 0.05 | Unique actions / total |
+Each step is evaluated on 3 independent dimensions: efficiency, safety, creativity.
 
-| Penalty | Rate | Cap |
-|---------|------|-----|
-| Wasted Remediation | -0.02/step beyond optimal | -0.15 |
-| Wasted Investigation | -0.005/step beyond budget | -0.10 |
+| # | Component | Weight | Dimension | What it measures |
+|---|-----------|--------|-----------|-----------------|
+| 1 | Reached Exit | 0.35 | -- | Binary: did the system reach healthy? |
+| 2 | Clean Path | 0.25 | Efficiency | Ratio: optimal_steps / actual_remediation |
+| 3 | Diagnosis | 0.15 | -- | Service + type + keywords (gated on exit) |
+| 4 | SRE Discipline | 0.10 | -- | Observe-after-fix + discover-before-action |
+| 5 | Trap Avoidance | 0.10 | Safety | Full credit if no traps, -0.05 per worsened outcome |
+| 6 | No Repeats | 0.05 | Creativity | Unique remediation actions / total |
 
 ### Design Principles
 
+- **No double counting.** Each dimension is independent. Extra steps lower Clean Path ratio. Harmful steps lower Trap Avoidance. Repeated steps lower No Repeats. A step is never penalized twice on the same dimension.
 - **Terminal reward, per-step state feedback.** Reward at episode end. Agent gets system state feedback (logs, metrics) after every action — that's the navigation signal.
-- **Per-step penalty is implicit.** More wasted steps = lower Clean Path ratio + step penalties.
 - **Diagnosis gated on exit.** Untested diagnosis = 0. Prevents gaming diagnosis-only.
-- **Penalties are capped.** Can't lose more than 0.25 total. Prevents catastrophic scores on genuine attempts.
-- **Difficulty gradient is natural.** Harder scenarios need more steps, more chances for waste, lower scores.
+- **Difficulty gradient is natural.** Harder scenarios need more steps, more chances for waste, lower Clean Path ratio.
 
 ### Strategy Scores
 
@@ -133,9 +129,9 @@ The agent discovers direction by **observing** (read_logs after each action). Th
 |----------|-------|
 | Perfect: investigate, fix optimally, diagnose | 1.00 |
 | Fixed but bad diagnosis | ~0.85 |
-| Fixed but 2x steps | ~0.65 |
+| Fixed but 2x steps | ~0.62 |
 | Good investigation, never fixed | ~0.15 |
-| Brute force with traps | ~0.34 |
+| Brute force with traps | ~0.30 |
 
 ## Scenarios (17)
 
@@ -184,18 +180,22 @@ uv run server
 ## Run Inference
 
 ```bash
-export OPENAI_API_KEY="your-key"
-export MODEL_NAME="gpt-5.4"
-python inference.py
+export API_BASE_URL="https://api.openai.com/v1"
+export MODEL_NAME="gpt-4o-mini"
+export HF_TOKEN="your-api-key"
+
+# Run baseline (2 episodes per tier, 8 total)
 python inference.py --space https://Maverick98-sre-incident-env.hf.space
-python inference.py --difficulty hard --episodes 3
+
+# Single difficulty
+python inference.py --space https://Maverick98-sre-incident-env.hf.space --difficulty hard --episodes 3
 ```
 
 ## Architecture
 
 - **Environment server**: MCPEnvironment (FastMCP) with 10 MCP tools
 - **State machine**: Graph-based traversal with per-state action tables
-- **Reward**: Fully deterministic, 6 rewards + 2 capped penalties
+- **Reward**: Fully deterministic, 6 components, no double counting
 - **Scenarios**: 17 built-in (5 easy + 5 medium + 5 hard + 2 expert), 96 states, 253 actions
 - **Client**: MCPToolClient (async), WebSocket with configurable ping
 - **Inference**: OpenAI function calling, smart context summarization
