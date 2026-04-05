@@ -507,8 +507,8 @@ async def async_main() -> None:
                 "thundering_herd_deploy_cache_miss_001",
             ],
             "hard": [
-                "cpu_microcode_tsc_drift_001",
-                "etcd_compaction_quota_alarm_001",
+                "jvm_metaspace_classloader_leak_001",
+                "numa_cross_socket_latency_001",
             ],
             "expert": [
                 "cert_expiry_mutual_tls_001",
