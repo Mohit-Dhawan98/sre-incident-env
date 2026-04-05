@@ -163,13 +163,13 @@ The agent discovers direction by **observing** (read_logs after each action). Th
 | cpu_tsc_drift | CPU microcode update caused TSC clock drift |
 | jvm_metaspace | Classloader agent leaking metaspace memory |
 | numa_cross_socket | NUMA auto-migration causing cross-socket latency |
-| kernel_tcp_rmem | Kernel TCP receive buffer silently dropping packets |
+| etcd_compaction | etcd compaction backlog triggering quota alarm |
 
-### Expert (4-5 step, 2 scenarios)
+### Expert (5 step, 2 scenarios)
 | Scenario | Root Cause |
 |----------|-----------|
 | cert_expiry | Mutual TLS cert expired + ACME auto-renewal broken |
-| etcd_compaction | etcd compaction backlog triggering quota alarm |
+| kernel_tcp_rmem | Kernel TCP receive buffer silently dropping packets |
 
 ## Run Locally
 

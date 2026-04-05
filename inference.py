@@ -508,11 +508,11 @@ async def async_main() -> None:
             ],
             "hard": [
                 "cpu_microcode_tsc_drift_001",
-                "numa_cross_socket_latency_001",
+                "etcd_compaction_quota_alarm_001",
             ],
             "expert": [
-                "etcd_compaction_quota_alarm_001",
                 "cert_expiry_mutual_tls_001",
+                "kernel_tcp_rmem_silent_drop_001",
             ],
         }
 
