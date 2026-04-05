@@ -4,19 +4,23 @@ Two modes:
   V1 (diagnosis only): 7-component scoring for investigation quality.
   V2 (maze navigation): 6 rewards + 2 capped penalties for full SRE lifecycle.
 
-V2 Reward — 4 pillars + 2 penalties:
+V2 Reward — 6 components, no double counting:
 
-  REWARDS (positive, sum to 1.0 on perfect run):
+  Each component measures a distinct dimension of agent quality.
+  Perfect run = 1.0. No separate penalty section — penalties are
+  embedded in the ratio/deduction components (Clean Path, Trap, Repeats).
+
     1. Reached Exit     (0.35): binary — did you fix the system?
     2. Clean Path       (0.25): ratio — optimal_steps / actual_remediation
     3. Diagnosis        (0.15): service + type + keywords (gated on exit)
     4. SRE Discipline   (0.10): observe-after-fix + discover-before-action
-    5. Trap Avoidance   (0.10): full credit if no traps, -0.05 per trap
+    5. Trap Avoidance   (0.10): starts full, -0.05 per worsened outcome
     6. No Repeats       (0.05): unique_actions / total_actions
 
-  PENALTIES (subtractive, capped):
-    A. Wasted Remediation  (-0.02/step beyond optimal, cap -0.15)
-    B. Wasted Investigation(-0.005/step beyond budget, cap -0.10)
+  No double counting: each step evaluated on 3 independent dimensions:
+    - Efficiency (Clean Path): ALL extra steps lower the ratio
+    - Safety (Trap Avoidance): only HARMFUL steps deduct
+    - Creativity (No Repeats): only REPEATED steps lower the ratio
 
 All deterministic. No model loading. Perfect run = 1.0.
 """
@@ -371,17 +375,13 @@ def compute_reward(
     # 6 positive components (sum to 1.0) + 2 capped penalties.
     # Perfect run = 1.0. Penalties subtract but are capped.
     #
-    # REWARDS (what good looks like):
-    #   1. REACHED EXIT        (0.35) — fixed the system
-    #   2. CLEAN PATH          (0.25) — optimal_steps / actual (ratio)
-    #   3. DIAGNOSIS           (0.15) — root cause understanding (gated on exit)
-    #   4. SRE DISCIPLINE      (0.10) — investigate before, observe after
-    #   5. TRAP AVOIDANCE      (0.10) — didn't make things worse
-    #   6. NO REPEATS          (0.05) — unique actions / total
-    #
-    # PENALTIES (capped deductions):
-    #   A. WASTED REMEDIATION  (-0.02/step beyond optimal, capped -0.15)
-    #   B. WASTED INVESTIGATION(-0.005/step beyond budget, capped -0.10)
+    # 6 components, 3 dimensions, no double counting:
+    #   1. REACHED EXIT        (0.35) — did you fix it?
+    #   2. CLEAN PATH          (0.25) — efficiency: optimal / actual ratio
+    #   3. DIAGNOSIS           (0.15) — understanding: root cause (gated on exit)
+    #   4. SRE DISCIPLINE      (0.10) — process: investigate before, observe after
+    #   5. TRAP AVOIDANCE      (0.10) — safety: didn't cause damage
+    #   6. NO REPEATS          (0.05) — creativity: tried different things
 
     # ── 1. REACHED EXIT (0.35) ─────────────────────────────────────
     maze_exit = 0.35 if system_healthy else 0.0
@@ -440,30 +440,17 @@ def compute_reward(
     else:
         maze_unique = 0.0
 
-    # ── PENALTY A: WASTED REMEDIATION ──────────────────────────────
-    # -0.02 per excess step beyond optimal. Capped at -0.15.
-    excess_rem = max(0, remediation_count - optimal_steps)
-    penalty_rem = min(0.15, excess_rem * 0.02)
-
-    # ── PENALTY B: WASTED INVESTIGATION ────────────────────────────
-    # Budget = optimal_steps * 4 + 8. -0.005 per excess step. Capped at -0.10.
-    total_investigative = len([
-        (t, a) for t, a in tool_call_history
-        if t in ("read_logs", "check_metric", "get_service_info")
-    ])
-    reasonable_budget = optimal_steps * 4 + 8
-    excess_inv = max(0, total_investigative - reasonable_budget)
-    penalty_inv = min(0.10, excess_inv * 0.005)
-
     # ══════════════════════════════════════════════════════════════════
-    # TOTAL
+    # TOTAL — 6 components, no separate penalties
     # ══════════════════════════════════════════════════════════════════
-    positive = (
+    # Clean Path ratio already penalizes extra steps (efficiency)
+    # Trap Avoidance already penalizes harmful steps (safety)
+    # No Repeats already penalizes repeated steps (creativity)
+    # No double counting — each dimension is independent
+    total = (
         maze_exit + maze_efficiency + maze_diagnosis
         + maze_discipline + maze_traps + maze_unique
     )
-    penalty = penalty_rem + penalty_inv
-    total = positive - penalty
 
     # Floor: partial credit if not fixed (trap avoidance + small base)
     if not system_healthy:
