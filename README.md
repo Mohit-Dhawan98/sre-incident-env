@@ -19,11 +19,12 @@ Fully deterministic reward, zero LLM calls at runtime.
 
 | Model | Easy | Medium | Hard | Expert | Overall | Fix Rate |
 |-------|------|--------|------|--------|---------|----------|
-| GPT-5.4 | 0.83 | 0.72 | 0.57 | 0.17 | 0.65 | 16/17 |
-| Gemini-2.5-Flash | 0.75 | 0.56 | 0.39 | 0.13 | 0.50 | 12/17 |
-| GPT-4o-mini | 0.26 | 0.36 | 0.17 | 0.15 | 0.25 | 2/17 |
+| Gemini-2.5-Flash | 0.85 | 0.69 | 0.56 | 0.15 | 0.63 | 12/17 |
+| GPT-5.4 | 0.74 | 0.70 | 0.58 | 0.15 | 0.61 | 11/17 |
+| o4-mini | 0.74 | 0.55 | 0.51 | 0.15 | 0.55 | 10/17 |
+| GPT-4o-mini | 0.29 | 0.29 | 0.13 | 0.15 | 0.22 | 2/17 |
 
-Difficulty gradient verified: easy > medium > hard > expert. Three distinct model tiers.
+Difficulty gradient verified across all 4 models: easy > medium > hard > expert. Expert scenarios (cert expiry, kernel TCP) unsolved by any model.
 
 ## Quick Start
 
