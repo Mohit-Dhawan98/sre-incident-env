@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Baseline inference for SRE Incident Response environment.
 
-Uses finqa pattern (native function calling with message chaining).
-Adds smart summarization when context exceeds threshold — replaces old
-tool_call/tool_response pairs with a compact investigation summary.
+Uses HTTP transport by default (works through HF Space proxy).
+Falls back to WebSocket with --websocket flag.
 
 Required env vars:
     API_BASE_URL   — LLM endpoint (default: https://api.openai.com/v1)
@@ -11,14 +10,14 @@ Required env vars:
     HF_TOKEN       — HuggingFace / API key for the LLM
 
 Usage:
-    # Run all difficulty tiers (1 episode each) — default for baseline scoring
-    python inference.py
-
-    # Run against HF Space
+    # Run all difficulty tiers (2 episodes each) — default for baseline scoring
     python inference.py --space https://Maverick98-sre-incident-env.hf.space
 
-    # Run a single difficulty with multiple episodes
-    python inference.py --difficulty hard --episodes 3 --model o4-mini
+    # Run locally
+    python inference.py
+
+    # Single difficulty
+    python inference.py --space https://Maverick98-sre-incident-env.hf.space --difficulty hard --episodes 3
 """
 
 from __future__ import annotations
@@ -32,7 +31,7 @@ from typing import Any, Dict, List
 
 from dotenv import load_dotenv
 
-load_dotenv(override=False)  # Don't override env vars set by the caller
+load_dotenv(override=False)
 
 from openai import OpenAI
 
@@ -43,8 +42,8 @@ from openai import OpenAI
 API_BASE_URL = os.getenv("API_BASE_URL") or "https://api.openai.com/v1"
 API_KEY = os.getenv("HF_TOKEN") or os.getenv("OPENAI_API_KEY") or os.getenv("API_KEY")
 MODEL = os.getenv("MODEL_NAME") or "gpt-4o"
-MAX_STEPS = 200  # V2: remediation needs room to try, fail, investigate, retry
-CONTEXT_CHAR_LIMIT = 120000  # ~30k tokens — summarize when total chars exceed this
+MAX_STEPS = 200
+CONTEXT_CHAR_LIMIT = 120000
 VERBOSE = True
 
 SYSTEM_PROMPT = """You are an expert on-call Site Reliability Engineer responding to a production incident.
@@ -94,23 +93,34 @@ This is a LIVE system — your actions have real consequences. Wrong fixes can m
 
 
 def mcp_tools_to_openai(tools) -> List[dict]:
-    """Convert MCP tool list to OpenAI function-calling format."""
+    """Convert tool list (dicts or objects) to OpenAI function-calling format."""
     openai_tools = []
     for tool in tools:
+        # Handle both dict (from HTTP) and object (from WebSocket) formats
+        if isinstance(tool, dict):
+            name = tool.get("name", "")
+            description = tool.get("description", "")
+            schema = tool.get("inputSchema", tool.get("input_schema", {}))
+        else:
+            name = tool.name
+            description = tool.description or ""
+            schema = tool.input_schema if hasattr(tool, "input_schema") else {}
+
         properties = {}
         required = []
-        if tool.input_schema and "properties" in tool.input_schema:
-            for name, schema in tool.input_schema["properties"].items():
-                prop = {"type": schema.get("type", "string")}
-                if "description" in schema:
-                    prop["description"] = schema["description"]
-                properties[name] = prop
-            required = tool.input_schema.get("required", [])
+        if schema and "properties" in schema:
+            for pname, pschema in schema["properties"].items():
+                prop = {"type": pschema.get("type", "string")}
+                if "description" in pschema:
+                    prop["description"] = pschema["description"]
+                properties[pname] = prop
+            required = schema.get("required", [])
+
         openai_tools.append({
             "type": "function",
             "function": {
-                "name": tool.name,
-                "description": tool.description or "",
+                "name": name,
+                "description": description,
                 "parameters": {
                     "type": "object",
                     "properties": properties,
@@ -122,17 +132,12 @@ def mcp_tools_to_openai(tools) -> List[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Context management — summarize old history, keep recent pairs intact
+# Context management
 # ---------------------------------------------------------------------------
 
 
 def summarize_old_messages(messages: List[dict]) -> List[dict]:
-    """Replace old tool_call/tool_response pairs with a compact text summary.
-
-    Keeps: system prompt + initial user message + summary + recent messages.
-    This preserves the finqa function-calling pattern for recent interactions
-    while compressing old context.
-    """
+    """Replace old tool_call/tool_response pairs with a compact text summary."""
     total_chars = sum(len(str(m.get("content", ""))) for m in messages)
     total_chars += sum(
         len(tc.get("function", {}).get("arguments", ""))
@@ -145,12 +150,8 @@ def summarize_old_messages(messages: List[dict]) -> List[dict]:
     system_msg = messages[0]
     initial_user_msg = messages[1]
 
-    # Split: old messages to summarize vs recent messages to keep
-    # Find a safe split point — must start recent window at an assistant message
-    # (never at a tool response, which would be orphaned)
     keep_recent = 15
     split_idx = len(messages) - keep_recent
-    # Walk forward to find an assistant message (start of a pair)
     while split_idx < len(messages) - 4:
         if messages[split_idx].get("role") == "assistant":
             break
@@ -158,13 +159,11 @@ def summarize_old_messages(messages: List[dict]) -> List[dict]:
     old_messages = messages[2:split_idx]
     recent_messages = messages[split_idx:]
 
-    # Build summary from old tool interactions
     summary_lines = ["Previous investigation steps:"]
     i = 0
     while i < len(old_messages):
         msg = old_messages[i]
         if msg.get("role") == "assistant" and msg.get("tool_calls"):
-            # Extract tool call info
             tc = msg["tool_calls"][0]
             tool_name = tc["function"]["name"]
             try:
@@ -173,25 +172,17 @@ def summarize_old_messages(messages: List[dict]) -> List[dict]:
             except (json.JSONDecodeError, TypeError):
                 args_short = tc["function"]["arguments"][:80]
 
-            # Get the tool response (next message)
             result_short = "(no response)"
             if i + 1 < len(old_messages) and old_messages[i + 1].get("role") == "tool":
                 content = old_messages[i + 1].get("content", "")
                 result_short = _summarize_tool_result(content)
-                i += 1  # skip the tool response
+                i += 1
 
             summary_lines.append(f"- {tool_name}({args_short}) → {result_short}")
-        elif msg.get("role") == "user":
-            # Skip user nudge messages
-            pass
-        elif msg.get("role") == "assistant" and msg.get("content"):
-            # Text response from model — skip in summary
-            pass
         i += 1
 
     summary_text = "\n".join(summary_lines)
 
-    # Rebuild: system + initial + summary + recent (intact function calling pairs)
     return [
         system_msg,
         initial_user_msg,
@@ -206,26 +197,20 @@ def _summarize_tool_result(content: str, max_chars: int = 150) -> str:
     try:
         data = json.loads(content)
         if "logs" in data:
-            count = data.get("count", len(data.get("logs", [])))
-            return f"{count} log entries"
+            return f"{data.get('count', len(data.get('logs', [])))} log entries"
         if "metric_series" in data:
-            pts = data.get("points", len(data.get("metric_series", [])))
-            svc = data.get("service", "?")
-            metric = data.get("metric", "?")
-            return f"{svc}.{metric}: {pts} points"
+            return f"{data.get('service', '?')}.{data.get('metric', '?')}: {data.get('points', '?')} points"
         if "services" in data:
             return f"services: {', '.join(data['services'][:6])}"
         if "error" in data:
             return f"error: {data['error'][:100]}"
-        if "result" in data:
-            return f"result: {data['result'][:100]}"
         return json.dumps(data)[:max_chars]
     except (json.JSONDecodeError, TypeError):
         return content[:max_chars] + "..."
 
 
 # ---------------------------------------------------------------------------
-# Episode runner (finqa pattern + smart summarization)
+# Episode runner — works with both HTTP and WebSocket clients
 # ---------------------------------------------------------------------------
 
 
@@ -237,12 +222,8 @@ async def run_episode(
     difficulty: str = "medium",
     scenario_id: str = None,
     seed: int = None,
-    env_base_url: str = "http://localhost:8000",
 ) -> Dict[str, Any]:
     """Run a single investigation episode using native function calling."""
-    from client import SREIncidentEnv
-    from openenv.core.env_server.mcp_types import CallToolAction
-
     tool_names = [t["function"]["name"] for t in tools]
     is_reasoning = any(x in model for x in ["o3", "o4", "gpt-5"])
 
@@ -252,14 +233,15 @@ async def run_episode(
         reset_kwargs["scenario_id"] = scenario_id
     if seed is not None:
         reset_kwargs["seed"] = seed
-    result = await env.reset(**reset_kwargs)
+    reset_result = await env.reset(**reset_kwargs)
 
-    # Extract alert message
-    alert_msg = ""
-    if hasattr(result, "observation") and hasattr(result.observation, "metadata"):
-        alert_msg = result.observation.metadata.get("message", "")
-    if hasattr(result, "metadata") and result.metadata:
-        alert_msg = alert_msg or result.metadata.get("message", "")
+    # Extract alert message — works for both HTTP (dict) and WebSocket (Observation)
+    if isinstance(reset_result, dict):
+        alert_msg = reset_result.get("message", "")
+    elif hasattr(reset_result, "metadata") and reset_result.metadata:
+        alert_msg = reset_result.metadata.get("message", "")
+    else:
+        alert_msg = ""
     if not alert_msg:
         alert_msg = "Production incident detected. Use list_services to begin."
 
@@ -275,7 +257,6 @@ async def run_episode(
     while not done and step_count < MAX_STEPS:
         step_count += 1
 
-        # LLM call with function calling
         create_kwargs: Dict[str, Any] = {
             "model": model,
             "messages": chat_history,
@@ -306,7 +287,6 @@ async def run_episode(
             try:
                 tool_args = json.loads(tool_call.function.arguments)
             except (json.JSONDecodeError, TypeError):
-                # Model returned malformed JSON — skip this call
                 chat_history.append({
                     "role": "assistant",
                     "content": None,
@@ -316,10 +296,10 @@ async def run_episode(
                 chat_history.append({
                     "role": "tool",
                     "tool_call_id": tool_call_id,
-                    "content": f"Error: your tool call had malformed JSON arguments: {tool_call.function.arguments[:200]}. Please retry with valid JSON.",
+                    "content": f"Error: malformed JSON arguments. Please retry with valid JSON.",
                 })
                 if VERBOSE:
-                    print(f"    T{step_count}: {tool_name}(...) [bad JSON, skipped]")
+                    print(f"    T{step_count}: {tool_name}(...) [bad JSON]")
                 continue
         elif message.content:
             consecutive_text += 1
@@ -329,7 +309,7 @@ async def run_episode(
             if consecutive_text >= 3:
                 chat_history.append({
                     "role": "user",
-                    "content": "You MUST call verify_resolution NOW with your best diagnosis. If you haven't fixed the system yet, call it anyway — you'll get partial credit for a correct diagnosis.",
+                    "content": "You MUST call verify_resolution NOW with your best diagnosis.",
                 })
             else:
                 chat_history.append({
@@ -369,10 +349,9 @@ async def run_episode(
                 print(" [unknown tool]")
             continue
 
-        # Execute in environment
+        # Execute tool — works for both HTTP and WebSocket clients
         try:
-            action = CallToolAction(tool_name=tool_name, arguments=tool_args)
-            step_result = await env.step(action)
+            result_text = await env.call_tool(tool_name, **tool_args)
         except Exception as e:
             chat_history.append({
                 "role": "tool",
@@ -383,21 +362,12 @@ async def run_episode(
                 print(f" [error: {e}]")
             continue
 
-        # Extract result
-        obs = step_result.observation if hasattr(step_result, "observation") else step_result
-        result_text = ""
-        obs_result = getattr(obs, "result", None)
-        if obs_result:
-            if isinstance(obs_result, dict) and "data" in obs_result:
-                result_text = obs_result["data"]
-            elif hasattr(obs_result, "data"):
-                result_text = obs_result.data
-        if not result_text and hasattr(obs, "metadata") and obs.metadata:
-            result_text = json.dumps(obs.metadata)
+        # Ensure result_text is a string
+        if not isinstance(result_text, str):
+            result_text = json.dumps(result_text) if result_text else ""
 
-        # Check done/reward from tool result
-        done = getattr(step_result, "done", False) or getattr(obs, "done", False)
-        reward = getattr(step_result, "reward", 0.0) or getattr(obs, "reward", 0.0)
+        # Check done/reward from result
+        reward = 0.0
         if result_text:
             try:
                 parsed = json.loads(result_text)
@@ -408,6 +378,12 @@ async def run_episode(
             except (json.JSONDecodeError, TypeError):
                 pass
 
+        # Also check HTTP client's stored state
+        if hasattr(env, "_last_done") and env._last_done:
+            done = True
+        if hasattr(env, "_last_reward") and env._last_reward:
+            reward = max(reward, env._last_reward)
+
         if VERBOSE:
             if done:
                 print(f" → done, reward={reward:.4f}")
@@ -417,18 +393,16 @@ async def run_episode(
         if done:
             return {"reward": float(reward), "steps": step_count}
 
-        # Truncate large tool results before adding to history
+        # Truncate large results
         if result_text and len(result_text) > 3000:
             result_text = result_text[:3000] + "\n...(truncated)"
 
-        # Feed result back
         chat_history.append({
             "role": "tool",
             "tool_call_id": tool_call_id,
             "content": result_text or "No result",
         })
 
-        # Summarize old context AFTER tool response is added (pairs intact)
         chat_history = summarize_old_messages(chat_history)
 
     return {"reward": 0.0, "error": "max_turns", "steps": MAX_STEPS}
@@ -442,13 +416,12 @@ async def run_episode(
 async def async_main() -> None:
     parser = argparse.ArgumentParser(description="SRE Incident Env Inference")
     parser.add_argument("--difficulty", default=None,
-                        choices=["easy", "medium", "hard", "expert"],
-                        help="Run a single difficulty. Omit to run all tiers.")
-    parser.add_argument("--episodes", type=int, default=2,
-                        help="Episodes per difficulty tier (default: 2)")
+                        choices=["easy", "medium", "hard", "expert"])
+    parser.add_argument("--episodes", type=int, default=2)
     parser.add_argument("--model", default=None)
-    parser.add_argument("--space", default=None,
-                        help="HF Space URL. If omitted, runs locally.")
+    parser.add_argument("--space", default=None, help="HF Space URL")
+    parser.add_argument("--websocket", action="store_true",
+                        help="Use WebSocket transport instead of HTTP")
     args = parser.parse_args()
 
     if not API_KEY:
@@ -458,16 +431,26 @@ async def async_main() -> None:
     model = args.model or MODEL
     llm_client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
 
-    # Connect to environment
+    # Choose transport
     if args.space:
-        from client import SREIncidentEnv
-        env_base_url = args.space
-        env = SREIncidentEnv(base_url=env_base_url)
+        base_url = args.space
         mode = f"remote ({args.space})"
     else:
+        base_url = "http://localhost:8000"
+        mode = "local (http://127.0.0.1:8000)"
+
+    if args.websocket:
         from client import SREIncidentEnv
-        env_base_url = "http://localhost:8000"
-        env = SREIncidentEnv(base_url=env_base_url)
+        env = SREIncidentEnv(base_url=base_url)
+        mode += " [WebSocket]"
+    else:
+        from client import SREIncidentEnvHTTP
+        env = SREIncidentEnvHTTP(base_url=base_url)
+        mode += " [HTTP]"
+
+    # Start local server if not using Space
+    server_proc = None
+    if not args.space:
         import subprocess, time
         server_proc = subprocess.Popen(
             [sys.executable, "-m", "uvicorn", "server.app:app",
@@ -475,88 +458,80 @@ async def async_main() -> None:
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
         time.sleep(3)
-        mode = "local (http://127.0.0.1:8000)"
 
-    # Determine which difficulties to run
-    if args.difficulty:
-        difficulties = [args.difficulty]
-    else:
-        difficulties = ["easy", "medium", "hard", "expert"]
+    difficulties = [args.difficulty] if args.difficulty else ["easy", "medium", "hard", "expert"]
+
+    BASELINE_SCENARIOS = {
+        "easy": [
+            "connection_leak_fd_exhaustion_001",
+            "circular_deadlock_service_dependency_001",
+        ],
+        "medium": [
+            "config_drift_gc_cascade_001",
+            "thundering_herd_deploy_cache_miss_001",
+        ],
+        "hard": [
+            "jvm_metaspace_classloader_leak_001",
+            "numa_cross_socket_latency_001",
+        ],
+        "expert": [
+            "cert_expiry_mutual_tls_001",
+            "kernel_tcp_rmem_silent_drop_001",
+        ],
+    }
 
     try:
-        # Discover tools once
-        await env.reset(difficulty="easy")
-        mcp_tools = await env.list_tools()
-        tools = mcp_tools_to_openai(mcp_tools)
+        async with env:
+            # Discover tools
+            reset_result = await env.reset(difficulty="easy")
+            tools_raw = await env.list_tools()
+            tools = mcp_tools_to_openai(tools_raw)
 
-        if VERBOSE:
-            print(f"Mode: {mode}")
-            print(f"Model: {model}")
-            print(f"Tools: {[t['function']['name'] for t in tools]}")
-            print(f"Difficulties: {difficulties} | Episodes per tier: {args.episodes}")
-            print("=" * 60)
+            if VERBOSE:
+                print(f"Mode: {mode}")
+                print(f"Model: {model}")
+                print(f"Tools: {[t['function']['name'] for t in tools]}")
+                print(f"Difficulties: {difficulties} | Episodes per tier: {args.episodes}")
+                print("=" * 60)
 
-        # Pre-selected scenarios for reproducible baselines (2 per tier)
-        BASELINE_SCENARIOS = {
-            "easy": [
-                "connection_leak_fd_exhaustion_001",
-                "circular_deadlock_service_dependency_001",
-            ],
-            "medium": [
-                "config_drift_gc_cascade_001",
-                "thundering_herd_deploy_cache_miss_001",
-            ],
-            "hard": [
-                "jvm_metaspace_classloader_leak_001",
-                "numa_cross_socket_latency_001",
-            ],
-            "expert": [
-                "cert_expiry_mutual_tls_001",
-                "kernel_tcp_rmem_silent_drop_001",
-            ],
-        }
+            all_results: Dict[str, List[Dict[str, Any]]] = {}
 
-        all_results: Dict[str, List[Dict[str, Any]]] = {}
+            for difficulty in difficulties:
+                print(f"\n{'─' * 40}")
+                print(f"  Difficulty: {difficulty.upper()}")
+                print(f"{'─' * 40}")
 
-        for difficulty in difficulties:
-            print(f"\n{'─' * 40}")
-            print(f"  Difficulty: {difficulty.upper()}")
-            print(f"{'─' * 40}")
+                tier_results = []
+                scenario_ids = BASELINE_SCENARIOS.get(difficulty, [None, None])
+                for i in range(args.episodes):
+                    sid = scenario_ids[i] if i < len(scenario_ids) else None
+                    print(f"\n  Episode {i+1}/{args.episodes}" + (f" ({sid})" if sid else "") + ":")
+                    result = await run_episode(
+                        env, llm_client, model, tools, difficulty, scenario_id=sid,
+                    )
+                    tier_results.append(result)
+                all_results[difficulty] = tier_results
 
-            tier_results = []
-            scenario_ids = BASELINE_SCENARIOS.get(difficulty, [None, None])
-            for i in range(args.episodes):
-                sid = scenario_ids[i] if i < len(scenario_ids) else None
-                print(f"\n  Episode {i+1}/{args.episodes}" + (f" ({sid})" if sid else "") + ":")
-                result = await run_episode(
-                    env, llm_client, model, tools, difficulty,
-                    scenario_id=sid,
-                    env_base_url=env_base_url,
-                )
-                tier_results.append(result)
-            all_results[difficulty] = tier_results
+            # Summary
+            print(f"\n{'=' * 60}")
+            print(f"BASELINE RESULTS — {model}")
+            print(f"{'=' * 60}")
+            overall_rewards = []
+            for difficulty, results in all_results.items():
+                valid = [r for r in results if "error" not in r]
+                avg = sum(r["reward"] for r in valid) / len(valid) if valid else 0
+                errors = len(results) - len(valid)
+                overall_rewards.extend(r["reward"] for r in valid)
+                print(f"  {difficulty:8s}: avg={avg:.4f} ({len(valid)} valid, {errors} errors)")
+                for i, r in enumerate(results):
+                    status = f"reward={r['reward']:.4f}" if "error" not in r else f"error={r['error'][:40]}"
+                    print(f"    Episode {i+1}: {status}")
 
-        # Summary
-        print(f"\n{'=' * 60}")
-        print(f"BASELINE RESULTS — {model}")
-        print(f"{'=' * 60}")
-        overall_rewards = []
-        for difficulty, results in all_results.items():
-            valid = [r for r in results if "error" not in r]
-            avg = sum(r["reward"] for r in valid) / len(valid) if valid else 0
-            errors = len(results) - len(valid)
-            overall_rewards.extend(r["reward"] for r in valid)
-            print(f"  {difficulty:8s}: avg={avg:.4f} ({len(valid)} valid, {errors} errors)")
-            for i, r in enumerate(results):
-                status = f"reward={r['reward']:.4f}" if "error" not in r else f"error={r['error'][:40]}"
-                print(f"    Episode {i+1}: {status}")
-
-        if overall_rewards:
-            print(f"\n  OVERALL: avg={sum(overall_rewards)/len(overall_rewards):.4f} across {len(overall_rewards)} episodes")
+            if overall_rewards:
+                print(f"\n  OVERALL: avg={sum(overall_rewards)/len(overall_rewards):.4f} across {len(overall_rewards)} episodes")
 
     finally:
-        await env.close()
-        if not args.space and 'server_proc' in locals():
+        if server_proc:
             server_proc.terminate()
 
 

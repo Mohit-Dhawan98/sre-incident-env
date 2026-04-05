@@ -29,9 +29,9 @@ Difficulty gradient verified across all 4 models: easy > medium > hard > expert.
 ## Quick Start
 
 ```python
-from client import SREIncidentEnv
+from client import SREIncidentEnvHTTP
 
-async with SREIncidentEnv(base_url="https://Maverick98-sre-incident-env.hf.space") as env:
+async with SREIncidentEnvHTTP(base_url="https://Maverick98-sre-incident-env.hf.space") as env:
     obs = await env.reset(difficulty="medium")
     tools = await env.list_tools()
 
