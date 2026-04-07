@@ -430,7 +430,8 @@ async def async_main() -> None:
     parser = argparse.ArgumentParser(description="SRE Incident Env Inference")
     parser.add_argument("--difficulty", default=None,
                         choices=["easy", "medium", "hard", "expert"])
-    parser.add_argument("--episodes", type=int, default=2)
+    parser.add_argument("--episodes", type=int, default=1,
+                        help="Runs per scenario (default 1 — keeps validator under 20min budget)")
     parser.add_argument("--model", default=None)
     parser.add_argument("--space", default=None, help="HF Space URL")
     parser.add_argument("--websocket", action="store_true",
