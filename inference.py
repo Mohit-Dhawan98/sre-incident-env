@@ -472,24 +472,22 @@ async def async_main() -> None:
         )
         time.sleep(3)
 
-    difficulties = [args.difficulty] if args.difficulty else ["easy", "medium", "hard", "expert"]
+    difficulties = [args.difficulty] if args.difficulty else ["easy", "medium", "hard"]
 
     BASELINE_SCENARIOS = {
         "easy": [
-            "connection_leak_fd_exhaustion_001",
-            "circular_deadlock_service_dependency_001",
+            "jvm_metaspace_classloader_leak_001",
+            "etcd_compaction_quota_alarm_001",
         ],
         "medium": [
-            "config_drift_gc_cascade_001",
-            "thundering_herd_deploy_cache_miss_001",
+            "kafka_partition_rebalance_storm_001",
+            "cpu_microcode_tsc_drift_001",
+            "cert_expiry_mutual_tls_001",
         ],
         "hard": [
-            "jvm_metaspace_classloader_leak_001",
             "numa_cross_socket_latency_001",
-        ],
-        "expert": [
-            "cert_expiry_mutual_tls_001",
             "kernel_tcp_rmem_silent_drop_001",
+            "wal_archive_disk_full_h002",
         ],
     }
 
@@ -524,24 +522,29 @@ async def async_main() -> None:
             print(f"{'─' * 40}")
 
             tier_results = []
-            scenario_ids = BASELINE_SCENARIOS.get(difficulty, [None, None])
-            for i in range(args.episodes):
-                sid = scenario_ids[i] if i < len(scenario_ids) else None
-                print(f"\n  Episode {i+1}/{args.episodes}" + (f" ({sid})" if sid else "") + ":")
-                # Fresh client per episode — failure in one episode doesn't kill the rest
-                try:
-                    async with make_env() as ep_env:
-                        result = await run_episode(
-                            ep_env, llm_client, model, tools, difficulty, scenario_id=sid,
-                        )
-                except Exception as e:
-                    if VERBOSE:
-                        print(f"    SESSION FAILED: {str(e)[:120]}")
-                    task_name = sid or f"{difficulty}_episode"
-                    print(f"[START] task={task_name}", flush=True)
-                    print(f"[END] task={task_name} score=0.0001 steps=0", flush=True)
-                    result = {"reward": 0.0001, "error": f"session_error: {str(e)[:100]}", "steps": 0}
-                tier_results.append(result)
+            scenario_ids = BASELINE_SCENARIOS.get(difficulty, [None])
+            # Run every scenario in the tier, args.episodes times each
+            total = len(scenario_ids) * args.episodes
+            idx = 0
+            for sid in scenario_ids:
+                for run_num in range(1, args.episodes + 1):
+                    idx += 1
+                    print(f"\n  Episode {idx}/{total} ({sid} run{run_num}):")
+                    try:
+                        async with make_env() as ep_env:
+                            result = await run_episode(
+                                ep_env, llm_client, model, tools, difficulty, scenario_id=sid,
+                            )
+                    except Exception as e:
+                        if VERBOSE:
+                            print(f"    SESSION FAILED: {str(e)[:120]}")
+                        task_name = sid or f"{difficulty}_episode"
+                        print(f"[START] task={task_name}", flush=True)
+                        print(f"[END] task={task_name} score=0.0001 steps=0", flush=True)
+                        result = {"reward": 0.0001, "error": f"session_error: {str(e)[:100]}", "steps": 0}
+                    result["scenario_id"] = sid
+                    result["run"] = run_num
+                    tier_results.append(result)
             all_results[difficulty] = tier_results
 
             # Summary
