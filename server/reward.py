@@ -366,7 +366,8 @@ def compute_reward(
             + breadth_score
             + query_efficiency_score
         )
-        return round(min(1.0, max(0.0, total)), 4)
+        # Hackathon Phase 2: scores must be strictly in (0, 1), not 0.0 or 1.0
+        return round(min(0.9999, max(0.0001, total)), 4)
 
     # ══════════════════════════════════════════════════════════════════
     # V2.1 MODE: MAZE NAVIGATION REWARD
@@ -456,4 +457,5 @@ def compute_reward(
     if not system_healthy:
         total = max(0.0, maze_traps + 0.05)
 
-    return round(min(1.0, max(0.0, total)), 4)
+    # Hackathon Phase 2: scores must be strictly in (0, 1), not 0.0 or 1.0
+    return round(min(0.9999, max(0.0001, total)), 4)
