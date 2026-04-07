@@ -79,6 +79,36 @@ class StateMachine:
         self.overlay_metrics: Dict[str, Dict] = {}
         self._action_time_offset = 0  # seconds after base_time + duration for overlay timestamps
 
+        # Progress tracking — for partial reward credit
+        self.state_depths = self._compute_state_depths()
+        self.max_progress_depth = 0  # furthest point on optimal path reached
+
+    def _compute_state_depths(self) -> Dict[str, int]:
+        """BFS from initial_state through progress/recovery edges only.
+
+        Returns map of state_name → depth, where depth is the number of
+        progress steps required to reach that state from initial_state.
+        Used for partial reward credit when not fully resolved.
+        """
+        from collections import deque
+        depths = {self.initial_state: 0}
+        queue = deque([self.initial_state])
+
+        while queue:
+            current = queue.popleft()
+            state_def = self.states.get(current, {})
+            current_depth = depths[current]
+
+            for action in state_def.get("actions", []):
+                if action.get("outcome") not in ("progress", "recovery"):
+                    continue
+                next_state = action.get("next_state")
+                if next_state and next_state not in depths:
+                    depths[next_state] = current_depth + 1
+                    queue.append(next_state)
+
+        return depths
+
     def _convert_flat_to_graph(self, remediation: Dict) -> Dict:
         """Convert V2.0 flat format to V2.1 graph format.
 
@@ -256,6 +286,11 @@ class StateMachine:
                 self.remediation_history.append((tool, target, params, outcome_type))
                 if outcome_type == "worsened":
                     self.harm_events.append((tool, action_def.get("message", "")))
+
+                # Track furthest progress depth reached on optimal path
+                new_depth = self.state_depths.get(next_state, 0)
+                if new_depth > self.max_progress_depth:
+                    self.max_progress_depth = new_depth
 
                 # Apply post-logs/metrics
                 self._apply_action_overlays(action_def)

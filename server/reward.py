@@ -130,6 +130,8 @@ def compute_reward(
     discovered_before_action: int = 0,
     execute_runbook_count: int = 0,
     unique_remediation_count: int = 0,
+    # V3 reward: partial progress credit (number of forward states reached on optimal path)
+    progress_state_visits: int = 0,
 ) -> float:
     """Compute reward for incident diagnosis + remediation maze navigation.
 
@@ -370,44 +372,49 @@ def compute_reward(
         return round(min(0.9999, max(0.0001, total)), 4)
 
     # ══════════════════════════════════════════════════════════════════
-    # V2.1 MODE: MAZE NAVIGATION REWARD
+    # V2.1/V3 MODE: MAZE NAVIGATION REWARD
     # ══════════════════════════════════════════════════════════════════
     #
-    # 6 positive components (sum to 1.0) + 2 capped penalties.
-    # Perfect run = 1.0. Penalties subtract but are capped.
+    # 7 components, sum to 1.00 max when fully solved, 0.50 max when not.
     #
-    # 6 components, 3 dimensions, no double counting:
-    #   1. REACHED EXIT        (0.35) — did you fix it?
-    #   2. CLEAN PATH          (0.25) — efficiency: optimal / actual ratio
-    #   3. DIAGNOSIS           (0.15) — understanding: root cause (gated on exit)
-    #   4. SRE DISCIPLINE      (0.10) — process: investigate before, observe after
-    #   5. TRAP AVOIDANCE      (0.10) — safety: didn't cause damage
-    #   6. NO REPEATS          (0.05) — creativity: tried different things
+    #   1. EXIT             (0.40) — binary, healthy only
+    #   2. PROGRESS         (0.20) — quadratic, continuous (always)
+    #   3. DIAGNOSIS        (0.10) — healthy only (gated)
+    #   4. EFFICIENCY       (0.10) — always
+    #   5. DISCIPLINE       (0.10) — always
+    #   6. TRAP AVOIDANCE   (0.05) — always
+    #   7. DIVERSITY        (0.05) — always
 
-    # ── 1. REACHED EXIT (0.35) ─────────────────────────────────────
-    maze_exit = 0.35 if system_healthy else 0.0
+    # ── 1. EXIT (0.40) — binary, healthy only ────────────────────
+    maze_exit = 0.40 if system_healthy else 0.0
 
-    # ── 2. CLEAN PATH (0.25) ──────────────────────────────────────
-    # Ratio: optimal / actual. Full credit at optimal, decays smoothly.
-    if remediation_count == 0:
-        maze_efficiency = 0.0
+    # ── 2. PROGRESS (0.20) — quadratic continuous credit ─────────
+    # Rewards how far the agent got along the optimal path.
+    # Quadratic: early steps count less, finishing the chain matters most.
+    if optimal_steps > 0:
+        progress_ratio = min(1.0, progress_state_visits / optimal_steps)
+        maze_progress = 0.20 * (progress_ratio ** 2)
     else:
-        ratio = min(1.0, optimal_steps / remediation_count)
-        maze_efficiency = 0.25 * ratio
+        maze_progress = 0.0
 
-    # ── 3. DIAGNOSIS (0.15) — gated on system_healthy ──────────────
+    # ── 3. DIAGNOSIS (0.10) — gated on system_healthy ────────────
     if system_healthy:
         sub_svc = submitted_service.strip().lower()
         true_svc = true_root_service.strip().lower()
 
-        diag_service = 0.07 if sub_svc == true_svc else (0.03 if services_graph and sub_svc in _get_neighbors(true_svc, services_graph) else 0.0)
+        diag_service = 0.05 if sub_svc == true_svc else (
+            0.02 if services_graph and sub_svc in _get_neighbors(true_svc, services_graph) else 0.0
+        )
 
-        diag_type = 0.04 if (submitted_failure_type.strip().lower() == true_failure_type.strip().lower() and submitted_failure_type.strip()) else 0.0
+        diag_type = 0.025 if (
+            submitted_failure_type.strip().lower() == true_failure_type.strip().lower()
+            and submitted_failure_type.strip()
+        ) else 0.0
 
         submitted_text = submitted_root_cause.strip().lower()
         if explanation_keywords and len(submitted_text) >= 10:
             found = sum(1 for kw in explanation_keywords if kw.lower() in submitted_text)
-            diag_keywords = (found / len(explanation_keywords)) * 0.04
+            diag_keywords = (found / len(explanation_keywords)) * 0.025
         else:
             diag_keywords = 0.0
 
@@ -415,47 +422,49 @@ def compute_reward(
     else:
         maze_diagnosis = 0.0
 
-    # ── 4. SRE DISCIPLINE (0.10) ─────────────────────────────────────
-    # Good SRE practice: investigate before acting, observe outcomes after.
+    # ── 4. EFFICIENCY (0.10) — gated on progress ─────────────────
+    # Only awarded when the agent actually made forward progress.
+    # Scaled by progress ratio so 0 progress = 0 efficiency credit.
+    if remediation_count == 0 or optimal_steps == 0:
+        maze_efficiency = 0.0
+    else:
+        progress_scale = min(1.0, progress_state_visits / optimal_steps)
+        ratio = min(1.0, optimal_steps / remediation_count)
+        maze_efficiency = 0.10 * ratio * progress_scale
+
+    # ── 5. DISCIPLINE (0.10) — gated on progress ─────────────────
+    # Process matters only if the agent did something forward.
     maze_discipline = 0.0
-    if remediation_count > 0:
-        # Observe after fix: read_logs after remediation (0.05)
+    if remediation_count > 0 and progress_state_visits > 0:
+        progress_scale = min(1.0, progress_state_visits / optimal_steps) if optimal_steps > 0 else 0
         observe_ratio = min(1.0, observation_after_fix / remediation_count)
-        maze_discipline += 0.05 * observe_ratio
-        # Discover before action: get_service_info before execute_runbook (0.05)
+        maze_discipline += 0.05 * observe_ratio * progress_scale
         if execute_runbook_count > 0:
             discover_ratio = min(1.0, discovered_before_action / execute_runbook_count)
-            maze_discipline += 0.05 * discover_ratio
+            maze_discipline += 0.05 * discover_ratio * progress_scale
         else:
-            maze_discipline += 0.05  # Platform tools only, no discovery needed
+            maze_discipline += 0.05 * progress_scale
 
-    # ── 5. TRAP AVOIDANCE (0.10) ───────────────────────────────────
-    # Full credit for zero traps. Lose 0.05 per trap. Floor 0.
-    maze_traps = max(0.0, 0.10 - harm_count * 0.05)
+    # ── 6. TRAP AVOIDANCE (0.05) — always ────────────────────────
+    maze_traps = max(0.0, 0.05 - harm_count * 0.025)
 
-    # ── 6. NO REPEATS (0.05) ──────────────────────────────────────
-    # Rewards trying different actions. Penalizes brute-forcing same call.
-    if remediation_count > 0:
+    # ── 7. DIVERSITY (0.05) — gated on progress ──────────────────
+    if remediation_count > 0 and progress_state_visits > 0:
+        progress_scale = min(1.0, progress_state_visits / optimal_steps) if optimal_steps > 0 else 0
         unique_ratio = min(1.0, unique_remediation_count / remediation_count)
-        maze_unique = 0.05 * unique_ratio
+        maze_unique = 0.05 * unique_ratio * progress_scale
     else:
         maze_unique = 0.0
 
     # ══════════════════════════════════════════════════════════════════
-    # TOTAL — 6 components, no separate penalties
+    # TOTAL — 7 components, no overrides
+    # Healthy max:    0.40 + 0.20 + 0.10 + 0.10 + 0.10 + 0.05 + 0.05 = 1.00
+    # Not-healthy max: 0   + 0.20 + 0    + 0.10 + 0.10 + 0.05 + 0.05 = 0.50
     # ══════════════════════════════════════════════════════════════════
-    # Clean Path ratio already penalizes extra steps (efficiency)
-    # Trap Avoidance already penalizes harmful steps (safety)
-    # No Repeats already penalizes repeated steps (creativity)
-    # No double counting — each dimension is independent
     total = (
-        maze_exit + maze_efficiency + maze_diagnosis
-        + maze_discipline + maze_traps + maze_unique
+        maze_exit + maze_progress + maze_diagnosis
+        + maze_efficiency + maze_discipline + maze_traps + maze_unique
     )
 
-    # Floor: partial credit if not fixed (trap avoidance + small base)
-    if not system_healthy:
-        total = max(0.0, maze_traps + 0.05)
-
-    # Hackathon Phase 2: scores must be strictly in (0, 1), not 0.0 or 1.0
+    # Hackathon Phase 2: scores must be strictly in (0, 1)
     return round(min(0.9999, max(0.0001, total)), 4)

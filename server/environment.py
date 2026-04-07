@@ -6,6 +6,7 @@ make things worse (trap doors). Agent verifies resolution when fixed.
 """
 
 import json
+import os
 import random
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -37,10 +38,20 @@ class SREIncidentEnvironment(MCPEnvironment):
         self._register_tools(mcp)
         super().__init__(mcp)
 
-        # Use V2 scenarios if available, fall back to V1
-        v2_path = Path(__file__).parent.parent / "scenarios" / "incidents_v2.jsonl"
-        v1_path = Path(__file__).parent.parent / "scenarios" / "incidents.jsonl"
-        scenario_path = v2_path if v2_path.exists() else v1_path
+        # Scenario file: env var override > v3 > v2 > v1
+        override = os.environ.get("SCENARIO_FILE")
+        if override and Path(override).exists():
+            scenario_path = Path(override)
+        else:
+            v3_path = Path(__file__).parent.parent / "scenarios" / "incidents_v3.jsonl"
+            v2_path = Path(__file__).parent.parent / "scenarios" / "incidents_v2.jsonl"
+            v1_path = Path(__file__).parent.parent / "scenarios" / "incidents.jsonl"
+            if v3_path.exists():
+                scenario_path = v3_path
+            elif v2_path.exists():
+                scenario_path = v2_path
+            else:
+                scenario_path = v1_path
         self.loader = ScenarioLoader(str(scenario_path))
 
         # Episode state
@@ -475,6 +486,8 @@ class SREIncidentEnvironment(MCPEnvironment):
                 discovered_before_action=self._discovered_before_action,
                 execute_runbook_count=self._execute_runbook_count,
                 unique_remediation_count=len(self._unique_remediation_keys),
+                # V3 reward: partial progress credit
+                progress_state_visits=getattr(self._state_machine, "max_progress_depth", 0) if self._state_machine else 0,
             )
 
             self._done = True
