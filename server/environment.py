@@ -77,12 +77,6 @@ class SREIncidentEnvironment(MCPEnvironment):
         self._unique_remediation_keys: set = set()       # unique (tool, target, action) combos
         self._state = State(episode_id=str(uuid4()), step_count=0)
 
-    def _has_remediation(self) -> bool:
-        """Check if current scenario has V2 remediation data."""
-        if not self._scenario:
-            return False
-        return "remediation" in self._scenario.get("failure", {})
-
     def _register_tools(self, mcp: FastMCP) -> None:
         """Register all SRE tools on the MCP server."""
 
@@ -297,65 +291,6 @@ class SREIncidentEnvironment(MCPEnvironment):
                 "scale_replicas", service, {"count": count}
             )
 
-        # ─── V1 BACKWARD COMPAT ────────────────────────────────────
-
-        @mcp.tool
-        def submit_diagnosis(
-            affected_service: str,
-            failure_type: str,
-            root_cause: str,
-            confidence: float = 0.5,
-            causal_chain: Optional[str] = None,
-        ) -> str:
-            """Submit your root-cause diagnosis. Ends the episode.
-
-            Args:
-                affected_service: The service where the root cause ORIGINATES.
-                failure_type: Category of failure (e.g. connection_leak, config_drift, etc.)
-                root_cause: "[service] [mechanism] caused [downstream effect]".
-                confidence: Your confidence 0.0 to 1.0.
-                causal_chain: Comma-separated services from root to symptom.
-            """
-            if self._done:
-                return json.dumps({"error": "Episode already ended."})
-            if self._scenario is None:
-                return json.dumps({"error": "No episode active."})
-
-            chain_list = []
-            if causal_chain:
-                chain_list = [s.strip() for s in causal_chain.split(",") if s.strip()]
-
-            failure = self._scenario["failure"]
-            all_services = set(self._scenario["services"].keys())
-            reward = compute_reward(
-                submitted_root_cause=root_cause,
-                submitted_service=affected_service,
-                true_root_cause=failure["root_cause_statement"],
-                true_root_service=failure["root_service"],
-                steps_used=self._queries_used,
-                query_budget=self._query_budget,
-                difficulty=self._difficulty,
-                confidence=confidence,
-                services_queried=self._services_queried,
-                all_services=all_services,
-                submitted_failure_type=failure_type,
-                true_failure_type=failure["root_cause_type"],
-                submitted_chain=chain_list,
-                services_graph=self._scenario["services"],
-                tool_call_history=self._tool_call_history,
-                true_causal_chain=failure.get("causal_chain", []),
-                optimal_queries=failure.get("optimal_queries", 10),
-                explanation_keywords=failure.get("explanation_keywords", []),
-            )
-            self._done = True
-            self._current_reward = reward
-            return json.dumps({
-                "result": "diagnosis_submitted",
-                "reward": reward,
-                "done": True,
-                "message": f"Diagnosis submitted. Reward: {reward:.4f}",
-            })
-
         # ─── APPLICATION REMEDIATION (META TOOL) ───────────────────
 
         @mcp.tool
@@ -402,8 +337,6 @@ class SREIncidentEnvironment(MCPEnvironment):
             affected_service: str,
             failure_type: str,
             root_cause: str,
-            confidence: float = 0.5,
-            causal_chain: Optional[str] = None,
         ) -> str:
             """Verify the system is healthy and submit your diagnosis. Ends the episode.
 
@@ -411,82 +344,45 @@ class SREIncidentEnvironment(MCPEnvironment):
             if your fix actually worked AND grade your diagnosis.
 
             You can call this even if the system isn't fixed — you'll get partial
-            credit for correct diagnosis but zero for remediation.
+            credit for progress but the bulk of the reward requires a healthy system.
 
             Args:
                 affected_service: The service where the root cause ORIGINATES.
                 failure_type: Category of failure (e.g. connection_leak, config_drift, cert_expiry, cache_stampede, etc.)
                 root_cause: Explanation: "[service] [mechanism] caused [downstream effect]".
-                confidence: Your confidence 0.0 to 1.0.
-                causal_chain: Comma-separated services from root cause to visible symptom (e.g. "svc-a,svc-b,svc-c").
             """
             if self._done:
                 return json.dumps({"error": "Episode already ended."})
             if self._scenario is None:
                 return json.dumps({"error": "No episode active."})
 
-            chain_list = []
-            if causal_chain:
-                chain_list = [s.strip() for s in causal_chain.split(",") if s.strip()]
-
             failure = self._scenario["failure"]
-            all_services = set(self._scenario["services"].keys())
 
             # Determine system health from state machine
             system_healthy = False
-            remediation_attempts = 0
             harm_count = 0
-            correct_fix_used = False
-            first_try_correct = False
-
             if self._state_machine:
                 system_healthy = self._state_machine.is_resolved()
-                remediation_attempts = self._state_machine.remediation_attempts
                 harm_count = len(self._state_machine.harm_events)
-                # Check if any correct action was used
-                for tool, target, params, outcome in self._state_machine.remediation_history:
-                    if outcome == "recovery":
-                        correct_fix_used = True
-                        if self._state_machine.remediation_history.index((tool, target, params, outcome)) == 0:
-                            first_try_correct = True
-                        break
 
-            # Get optimal_steps from remediation data
-            rem_data = failure.get("remediation", {})
-            optimal_steps = rem_data.get("optimal_steps", 2)
+            optimal_steps = failure.get("remediation", {}).get("optimal_steps", 2)
 
             reward = compute_reward(
                 submitted_root_cause=root_cause,
                 submitted_service=affected_service,
-                true_root_cause=failure["root_cause_statement"],
                 true_root_service=failure["root_service"],
-                steps_used=self._queries_used,
-                query_budget=self._query_budget,
-                difficulty=self._difficulty,
-                confidence=confidence,
-                services_queried=self._services_queried,
-                all_services=all_services,
                 submitted_failure_type=failure_type,
                 true_failure_type=failure["root_cause_type"],
-                submitted_chain=chain_list,
                 services_graph=self._scenario["services"],
-                tool_call_history=self._tool_call_history,
-                true_causal_chain=failure.get("causal_chain", []),
-                optimal_queries=failure.get("optimal_queries", 10),
                 explanation_keywords=failure.get("explanation_keywords", []),
-                # V2.1 maze navigation params
                 system_healthy=system_healthy,
-                remediation_attempts=remediation_attempts,
                 harm_count=harm_count,
-                correct_fix_used=correct_fix_used,
-                first_try_correct=first_try_correct,
                 optimal_steps=optimal_steps,
                 remediation_count=self._remediation_count,
                 observation_after_fix=self._observation_after_fix,
                 discovered_before_action=self._discovered_before_action,
                 execute_runbook_count=self._execute_runbook_count,
                 unique_remediation_count=len(self._unique_remediation_keys),
-                # V3 reward: partial progress credit
                 progress_state_visits=getattr(self._state_machine, "max_progress_depth", 0) if self._state_machine else 0,
             )
 
@@ -541,11 +437,6 @@ class SREIncidentEnvironment(MCPEnvironment):
 
         if not self._state_machine:
             return json.dumps({"error": "No episode active."})
-
-        if not self._has_remediation():
-            return json.dumps({
-                "error": "This scenario does not support remediation actions. Use submit_diagnosis instead.",
-            })
 
         outcome = self._state_machine.process_remediation(tool, service, params)
 
@@ -620,20 +511,14 @@ class SREIncidentEnvironment(MCPEnvironment):
         )
 
         # Build alert message
-        terminal_tool = "verify_resolution" if self._has_remediation() else "submit_diagnosis"
         alert = (
             f"[INCIDENT ALERT] {self._scenario['title']}\n"
             f"Severity detected. Investigate using the available tools.\n"
             f"Use list_services to see the topology, then read_logs and check_metric to investigate.\n"
+            f"Use get_service_info to discover available actions on each service.\n"
+            f"Apply fixes with restart_service, rollback_deploy, scale_replicas, or execute_runbook.\n"
+            f"Call verify_resolution when the system is healthy."
         )
-        if self._has_remediation():
-            alert += (
-                f"Use get_service_info to discover available actions on each service.\n"
-                f"Apply fixes with restart_service, rollback_deploy, scale_replicas, or execute_runbook.\n"
-                f"Call verify_resolution when the system is healthy."
-            )
-        else:
-            alert += f"Submit your diagnosis with submit_diagnosis when ready."
 
         return Observation(
             done=False,

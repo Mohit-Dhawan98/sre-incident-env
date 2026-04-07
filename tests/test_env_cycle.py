@@ -40,14 +40,13 @@ def test_full_episode_easy(env):
     ))
     assert not obs.done
 
-    # Submit diagnosis
+    # Submit verification
     obs = env.step(CallToolAction(
-        tool_name="submit_diagnosis",
+        tool_name="verify_resolution",
         arguments={
             "affected_service": svc,
             "failure_type": "cache_node_failure",
             "root_cause": "cache node failure",
-            "confidence": 0.7,
         },
     ))
     assert obs.done
@@ -115,8 +114,8 @@ def test_budget_exhaustion(env):
 def test_step_after_done_raises(env):
     env.reset(seed=42, difficulty="easy")
     env.step(CallToolAction(
-        tool_name="submit_diagnosis",
-        arguments={"affected_service": "test", "failure_type": "other", "root_cause": "test", "confidence": 0.5},
+        tool_name="verify_resolution",
+        arguments={"affected_service": "test", "failure_type": "other", "root_cause": "test"},
     ))
     # Next tool call should get error response (episode done)
     obs = env.step(CallToolAction(

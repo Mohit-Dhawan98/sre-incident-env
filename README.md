@@ -66,8 +66,7 @@ async with SREIncidentEnvHTTP(base_url="https://Maverick98-sre-incident-env.hf.s
 | Platform | `rollback_deploy(service)` | Revert to previous deployment |
 | Platform | `scale_replicas(service, count)` | Scale horizontally |
 | Application | `execute_runbook(service, action, params)` | Service-specific action from runbook |
-| Terminal | `verify_resolution(affected_service, failure_type, root_cause, causal_chain)` | Check health + submit diagnosis. Ends episode |
-| Terminal | `submit_diagnosis(...)` | V1 compat — diagnosis only |
+| Terminal | `verify_resolution(affected_service, failure_type, root_cause)` | Check health + submit diagnosis. Ends episode |
 
 ## State Graph Design
 
