@@ -235,6 +235,10 @@ async def run_episode(
         reset_kwargs["seed"] = seed
     reset_result = await env.reset(**reset_kwargs)
 
+    # Hackathon Phase 2 structured output: [START]
+    task_name = scenario_id or f"{difficulty}_episode"
+    print(f"[START] task={task_name}", flush=True)
+
     # Extract alert message — works for both HTTP (dict) and WebSocket (Observation)
     if isinstance(reset_result, dict):
         alert_msg = reset_result.get("message", "")
@@ -274,6 +278,7 @@ async def run_episode(
         except Exception as e:
             if VERBOSE:
                 print(f"    API error: {str(e)[:100]}")
+            print(f"[END] task={task_name} score=0.0000 steps={step_count}", flush=True)
             return {"reward": 0.0, "error": str(e)[:200], "steps": step_count}
 
         message = response.choices[0].message
@@ -390,7 +395,11 @@ async def run_episode(
             else:
                 print()
 
+        # Hackathon Phase 2 structured output: [STEP] — printed on its own line
+        print(f"[STEP] step={step_count} reward={reward:.4f}", flush=True)
+
         if done:
+            print(f"[END] task={task_name} score={reward:.4f} steps={step_count}", flush=True)
             return {"reward": float(reward), "steps": step_count}
 
         # Truncate large results
@@ -405,6 +414,7 @@ async def run_episode(
 
         chat_history = summarize_old_messages(chat_history)
 
+    print(f"[END] task={task_name} score=0.0000 steps={MAX_STEPS}", flush=True)
     return {"reward": 0.0, "error": "max_turns", "steps": MAX_STEPS}
 
 
@@ -481,36 +491,55 @@ async def async_main() -> None:
     }
 
     try:
-        async with env:
-            # Discover tools
-            reset_result = await env.reset(difficulty="easy")
-            tools_raw = await env.list_tools()
+        # Discover tools using a one-shot session (separate from episodes)
+        async with env as discover_env:
+            reset_result = await discover_env.reset(difficulty="easy")
+            tools_raw = await discover_env.list_tools()
             tools = mcp_tools_to_openai(tools_raw)
 
-            if VERBOSE:
-                print(f"Mode: {mode}")
-                print(f"Model: {model}")
-                print(f"Tools: {[t['function']['name'] for t in tools]}")
-                print(f"Difficulties: {difficulties} | Episodes per tier: {args.episodes}")
-                print("=" * 60)
+        if VERBOSE:
+            print(f"Mode: {mode}")
+            print(f"Model: {model}")
+            print(f"Tools: {[t['function']['name'] for t in tools]}")
+            print(f"Difficulties: {difficulties} | Episodes per tier: {args.episodes}")
+            print("=" * 60)
 
-            all_results: Dict[str, List[Dict[str, Any]]] = {}
+        all_results: Dict[str, List[Dict[str, Any]]] = {}
 
-            for difficulty in difficulties:
-                print(f"\n{'─' * 40}")
-                print(f"  Difficulty: {difficulty.upper()}")
-                print(f"{'─' * 40}")
+        # Helper to build a fresh client per episode (HTTP transport — each episode gets its own session)
+        def make_env():
+            if args.websocket:
+                from client import SREIncidentEnv
+                return SREIncidentEnv(base_url=base_url)
+            else:
+                from client import SREIncidentEnvHTTP
+                return SREIncidentEnvHTTP(base_url=base_url)
 
-                tier_results = []
-                scenario_ids = BASELINE_SCENARIOS.get(difficulty, [None, None])
-                for i in range(args.episodes):
-                    sid = scenario_ids[i] if i < len(scenario_ids) else None
-                    print(f"\n  Episode {i+1}/{args.episodes}" + (f" ({sid})" if sid else "") + ":")
-                    result = await run_episode(
-                        env, llm_client, model, tools, difficulty, scenario_id=sid,
-                    )
-                    tier_results.append(result)
-                all_results[difficulty] = tier_results
+        for difficulty in difficulties:
+            print(f"\n{'─' * 40}")
+            print(f"  Difficulty: {difficulty.upper()}")
+            print(f"{'─' * 40}")
+
+            tier_results = []
+            scenario_ids = BASELINE_SCENARIOS.get(difficulty, [None, None])
+            for i in range(args.episodes):
+                sid = scenario_ids[i] if i < len(scenario_ids) else None
+                print(f"\n  Episode {i+1}/{args.episodes}" + (f" ({sid})" if sid else "") + ":")
+                # Fresh client per episode — failure in one episode doesn't kill the rest
+                try:
+                    async with make_env() as ep_env:
+                        result = await run_episode(
+                            ep_env, llm_client, model, tools, difficulty, scenario_id=sid,
+                        )
+                except Exception as e:
+                    if VERBOSE:
+                        print(f"    SESSION FAILED: {str(e)[:120]}")
+                    task_name = sid or f"{difficulty}_episode"
+                    print(f"[START] task={task_name}", flush=True)
+                    print(f"[END] task={task_name} score=0.0000 steps=0", flush=True)
+                    result = {"reward": 0.0, "error": f"session_error: {str(e)[:100]}", "steps": 0}
+                tier_results.append(result)
+            all_results[difficulty] = tier_results
 
             # Summary
             print(f"\n{'=' * 60}")
