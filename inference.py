@@ -278,8 +278,8 @@ async def run_episode(
         except Exception as e:
             if VERBOSE:
                 print(f"    API error: {str(e)[:100]}")
-            print(f"[END] task={task_name} score=0.0000 steps={step_count}", flush=True)
-            return {"reward": 0.0, "error": str(e)[:200], "steps": step_count}
+            print(f"[END] task={task_name} score=0.0001 steps={step_count}", flush=True)
+            return {"reward": 0.0001, "error": str(e)[:200], "steps": step_count}
 
         message = response.choices[0].message
 
@@ -396,10 +396,13 @@ async def run_episode(
                 print()
 
         # Hackathon Phase 2 structured output: [STEP] — printed on its own line
-        print(f"[STEP] step={step_count} reward={reward:.4f}", flush=True)
+        # Score must be strictly in (0, 1)
+        safe_step_reward = max(0.0001, min(0.9999, reward))
+        print(f"[STEP] step={step_count} reward={safe_step_reward:.4f}", flush=True)
 
         if done:
-            print(f"[END] task={task_name} score={reward:.4f} steps={step_count}", flush=True)
+            safe_reward = max(0.0001, min(0.9999, reward))
+            print(f"[END] task={task_name} score={safe_reward:.4f} steps={step_count}", flush=True)
             return {"reward": float(reward), "steps": step_count}
 
         # Truncate large results
@@ -414,8 +417,8 @@ async def run_episode(
 
         chat_history = summarize_old_messages(chat_history)
 
-    print(f"[END] task={task_name} score=0.0000 steps={MAX_STEPS}", flush=True)
-    return {"reward": 0.0, "error": "max_turns", "steps": MAX_STEPS}
+    print(f"[END] task={task_name} score=0.0001 steps={MAX_STEPS}", flush=True)
+    return {"reward": 0.0001, "error": "max_turns", "steps": MAX_STEPS}
 
 
 # ---------------------------------------------------------------------------
@@ -536,8 +539,8 @@ async def async_main() -> None:
                         print(f"    SESSION FAILED: {str(e)[:120]}")
                     task_name = sid or f"{difficulty}_episode"
                     print(f"[START] task={task_name}", flush=True)
-                    print(f"[END] task={task_name} score=0.0000 steps=0", flush=True)
-                    result = {"reward": 0.0, "error": f"session_error: {str(e)[:100]}", "steps": 0}
+                    print(f"[END] task={task_name} score=0.0001 steps=0", flush=True)
+                    result = {"reward": 0.0001, "error": f"session_error: {str(e)[:100]}", "steps": 0}
                 tier_results.append(result)
             all_results[difficulty] = tier_results
 
