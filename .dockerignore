@@ -10,6 +10,8 @@ benchmark*.json
 .DS_Store
 outputs/*
 # Exceptions — UI assets must ship into the Docker image so the static
-# mount at /state_graphs/ and the Traces tab can find them at runtime
+# mount at /state_graphs/, the Traces tab, and the Leaderboard can find
+# them at runtime
 !outputs/state_graphs/
 !outputs/ui_traces/
+!outputs/leaderboard/

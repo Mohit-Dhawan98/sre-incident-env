@@ -1,0 +1,96 @@
+{
+  "gpt-5.4": {
+    "jvm_metaspace_classloader_leak_001": [
+      0.2714,
+      0.9063
+    ],
+    "etcd_compaction_quota_alarm_001": [
+      0.338,
+      0.865
+    ],
+    "kafka_partition_rebalance_storm_001": [
+      0.3275,
+      0.35
+    ],
+    "cpu_microcode_tsc_drift_001": [
+      0.2964,
+      0.2964
+    ],
+    "cert_expiry_mutual_tls_001": [
+      0.3375,
+      0.325
+    ],
+    "numa_cross_socket_latency_001": [
+      0.8811,
+      0.89
+    ],
+    "kernel_tcp_rmem_silent_drop_001": [
+      0.147,
+      0.8759
+    ],
+    "wal_archive_disk_full_h002": [
+      0.025,
+      0.05
+    ]
+  },
+  "o4-mini": {
+    "jvm_metaspace_classloader_leak_001": [
+      0.8936
+    ],
+    "etcd_compaction_quota_alarm_001": [
+      0.0001
+    ],
+    "kafka_partition_rebalance_storm_001": [
+      0.2713
+    ],
+    "cpu_microcode_tsc_drift_001": [
+      0.23
+    ],
+    "cert_expiry_mutual_tls_001": [
+      0.84
+    ],
+    "numa_cross_socket_latency_001": [
+      0.1307
+    ],
+    "kernel_tcp_rmem_silent_drop_001": [
+      0.1687
+    ],
+    "wal_archive_disk_full_h002": [
+      0.0001
+    ]
+  },
+  "gpt-4o-mini": {
+    "jvm_metaspace_classloader_leak_001": [
+      0.1583,
+      0.1875
+    ],
+    "etcd_compaction_quota_alarm_001": [
+      0.0923,
+      0.0001
+    ],
+    "kafka_partition_rebalance_storm_001": [
+      0.0001,
+      0.0001
+    ],
+    "cpu_microcode_tsc_drift_001": [
+      0.1687,
+      0.1611
+    ],
+    "cert_expiry_mutual_tls_001": [
+      0.325,
+      0.3375
+    ],
+    "numa_cross_socket_latency_001": [
+      0.0001,
+      0.2703
+    ],
+    "kernel_tcp_rmem_silent_drop_001": [
+      0.0001,
+      0.025
+    ],
+    "wal_archive_disk_full_h002": [
+      0.0001,
+      0.0001
+    ]
+  }
+}

@@ -22,6 +22,7 @@ outputs/*
 # Exceptions — UI assets that must ship to HF Space
 !outputs/state_graphs/
 !outputs/ui_traces/
+!outputs/leaderboard/
 benchmarks/
 *.log
 scenarios/incidents.jsonl

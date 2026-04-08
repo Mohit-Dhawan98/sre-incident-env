@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional, Tuple
 ROOT = Path(__file__).resolve().parent.parent
 SCENARIO_FILE = ROOT / "scenarios" / "incidents_v3.jsonl"
 LEADERBOARD_LOG_DIR = ROOT / "outputs" / "hf_bench_v2"
+LEADERBOARD_JSON = ROOT / "outputs" / "leaderboard" / "scores.json"
 TRACE_DIR = ROOT / "outputs" / "ui_traces"
 
 MODELS = ["gpt-5.4", "o4-mini", "gpt-4o-mini"]
@@ -334,10 +335,20 @@ END_RE = re.compile(r"\[END\] task=(\S+) score=([0-9.]+) steps=(\d+)")
 
 
 def load_leaderboard() -> Dict[str, Dict[str, List[float]]]:
-    """Parse leaderboard logs into {model: {scenario_id: [scores...]}}.
+    """Load leaderboard scores.
 
-    Reads outputs/hf_bench_v2/<model>.log (latest HF runs).
+    Prefers outputs/leaderboard/scores.json (committed, ships to Docker).
+    Falls back to parsing outputs/hf_bench_v2/<model>.log for local dev.
     """
+    # Preferred path: pre-computed JSON
+    if LEADERBOARD_JSON.exists():
+        try:
+            raw = json.loads(LEADERBOARD_JSON.read_text())
+            return {m: raw.get(m, {}) for m in MODELS}
+        except Exception:
+            pass
+
+    # Fallback: parse raw logs (dev machine only)
     out: Dict[str, Dict[str, List[float]]] = {m: defaultdict(list) for m in MODELS}
     for model in MODELS:
         log = LEADERBOARD_LOG_DIR / f"{model}.log"
