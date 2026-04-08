@@ -8,4 +8,8 @@ __pycache__/
 benchmark*.py
 benchmark*.json
 .DS_Store
-outputs/
+outputs/*
+# Exceptions — UI assets must ship into the Docker image so the static
+# mount at /state_graphs/ and the Traces tab can find them at runtime
+!outputs/state_graphs/
+!outputs/ui_traces/
