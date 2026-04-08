@@ -1,239 +1,109 @@
-"""Test V4 reward function — ungameable + learnable.
+"""Test V3 maze-navigation reward function.
 
-6 components:
-  Tier 1 (Diagnosis, 0.70): service ID, failure type, explanation, causal chain
-  Tier 2 (Investigation, 0.30): efficiency, breadth
+7 components, perfect run = 1.00:
+  1. Exit (0.40, healthy only)
+  2. Progress (0.20, quadratic)
+  3. Diagnosis (0.10, gated on healthy)
+  4. Efficiency (0.10, gated on progress)
+  5. Discipline (0.10, gated on progress)
+  6. Trap Avoidance (0.05)
+  7. Diversity (0.05, gated on progress)
 """
 
-import pytest
 from server.reward import compute_reward
 
 
-# upstream means "called BY". root-db is called by mid-svc, mid-svc by api-gw.
-# Failure propagates: root-db fails → mid-svc (calls root-db) → api-gw (calls mid-svc)
 GRAPH = {
     "root-db": {"upstream": ["mid-svc"]},
     "mid-svc": {"upstream": ["api-gw"]},
     "api-gw": {"upstream": []},
-    "unrelated": {"upstream": ["api-gw"]},
 }
 
 BASE = dict(
     submitted_root_cause="root-db connection pool exhausted due to config drift",
     submitted_service="root-db",
-    true_root_cause="root-db connection pool exhausted due to config drift in v2.3",
     true_root_service="root-db",
-    steps_used=5, query_budget=10, difficulty="medium",
-    all_services={"root-db", "mid-svc", "api-gw", "unrelated"},
+    submitted_failure_type="config_drift",
+    true_failure_type="config_drift",
     services_graph=GRAPH,
+    explanation_keywords=["root-db", "connection pool", "config drift"],
+    optimal_steps=3,
 )
 
 
-# ─── Component 1: Service ID ───────────────────────────────────────
-
-def test_service_exact_match():
-    r = compute_reward(**{**BASE})
-    assert r >= 0.25  # at least service score
-
-
-def test_service_adjacent_partial():
-    """One-hop neighbor gets 0.08, not 0.0."""
-    r = compute_reward(**{**BASE, "submitted_service": "mid-svc"})
-    assert 0.05 < r < 0.25  # adjacency bonus + investigation scores
-
-
-def test_service_wrong_scores_near_zero():
-    """Wrong non-adjacent service: only investigation tier contributes."""
-    r = compute_reward(**{**BASE, "submitted_service": "unrelated"})
-    assert r < 0.20  # no diagnosis credit, only investigation
-
-
-def test_service_wrong_gates_everything():
-    """Wrong service → type/explanation/chain all zero."""
-    r_wrong = compute_reward(**{
-        **BASE, "submitted_service": "wrong",
-        "submitted_failure_type": "config_drift",
-        "true_failure_type": "config_drift",
-        "submitted_chain": ["wrong", "mid-svc"],
-    })
-    r_right = compute_reward(**{
+def _call(**overrides):
+    return compute_reward(**{
         **BASE,
-        "submitted_failure_type": "config_drift",
-        "true_failure_type": "config_drift",
-        "submitted_chain": ["root-db", "mid-svc"],
+        "system_healthy": False,
+        "harm_count": 0,
+        "remediation_count": 0,
+        "observation_after_fix": 0,
+        "discovered_before_action": 0,
+        "execute_runbook_count": 0,
+        "unique_remediation_count": 0,
+        "progress_state_visits": 0,
+        **overrides,
     })
-    assert r_right > r_wrong + 0.30  # at least 0.30 more
 
 
-# ─── Component 2: Failure Type ──────────────────────────────────────
-
-def test_failure_type_match():
-    r_match = compute_reward(**{**BASE,
-        "submitted_failure_type": "config_drift", "true_failure_type": "config_drift"})
-    r_no = compute_reward(**{**BASE,
-        "submitted_failure_type": "oom_kill", "true_failure_type": "config_drift"})
-    assert r_match > r_no
+def test_zero_progress_floors():
+    """No progress + not healthy = base trap credit only."""
+    r = _call()
+    assert 0.04 < r < 0.06
 
 
-def test_failure_type_gated_on_service():
-    r = compute_reward(**{**BASE, "submitted_service": "wrong",
-        "submitted_failure_type": "config_drift", "true_failure_type": "config_drift"})
-    # Should not get type credit
-    r2 = compute_reward(**{**BASE, "submitted_service": "wrong"})
-    assert r == r2  # no difference — type is gated
+def test_partial_progress_quadratic():
+    """1/3 progress = (1/3)² = 0.111 x 0.20 ≈ 0.022 progress credit."""
+    r = _call(progress_state_visits=1, remediation_count=1,
+              observation_after_fix=1, execute_runbook_count=1,
+              discovered_before_action=1, unique_remediation_count=1)
+    assert 0.05 < r < 0.25
 
 
-# ─── Component 3: Explanation ────────────────────────────────────────
-
-def test_explanation_gradient():
-    r_good = compute_reward(**{**BASE,
-        "submitted_root_cause": "root-db connection pool exhausted due to config drift in deployment v2.3"})
-    r_bad = compute_reward(**{**BASE,
-        "submitted_root_cause": "something completely different and wrong explanation"})
-    assert r_good > r_bad
+def test_full_progress_not_healthy():
+    """All 3 steps done but not healthy: capped at 0.50."""
+    r = _call(progress_state_visits=3, remediation_count=3,
+              observation_after_fix=3, execute_runbook_count=3,
+              discovered_before_action=3, unique_remediation_count=3)
+    assert 0.45 < r < 0.51
 
 
-def test_explanation_length_penalty():
-    r_short = compute_reward(**{**BASE, "submitted_root_cause": "oom"})
-    r_proper = compute_reward(**{**BASE})
-    assert r_proper > r_short
+def test_perfect_run():
+    """Healthy + correct diagnosis + optimal steps = 1.00 (clamped 0.9999)."""
+    r = _call(system_healthy=True,
+              progress_state_visits=3, remediation_count=3,
+              observation_after_fix=3, execute_runbook_count=3,
+              discovered_before_action=3, unique_remediation_count=3)
+    assert r == 0.9999
 
 
-def test_explanation_gated_on_service():
-    r = compute_reward(**{**BASE, "submitted_service": "wrong"})
-    # Even perfect explanation, wrong service → no explanation credit
-    assert r < 0.15
+def test_trap_penalty():
+    """Each worsened outcome costs 0.025 from trap avoidance."""
+    r_clean = _call()
+    r_one_trap = _call(harm_count=1)
+    r_two_traps = _call(harm_count=2)
+    assert r_clean - r_one_trap > 0.02
+    assert r_one_trap - r_two_traps > 0.02
 
 
-# ─── Component 4: Causal Chain ───────────────────────────────────────
-
-def test_chain_valid_edges():
-    r = compute_reward(**{**BASE,
-        "submitted_chain": ["root-db", "mid-svc", "api-gw"]})
-    r_no = compute_reward(**{**BASE})
-    assert r > r_no
-
-
-def test_chain_partial_edges():
-    """Edge-fraction: 1/2 valid edges should score less than 2/2."""
-    r_full = compute_reward(**{**BASE,
-        "submitted_chain": ["root-db", "mid-svc", "api-gw"]})  # 2/2 valid
-    r_partial = compute_reward(**{**BASE,
-        "submitted_chain": ["root-db", "api-gw"]})  # 0/1 valid (skips mid)
-    assert r_full > r_partial
+def test_wrong_service_no_diagnosis_credit():
+    """Wrong service = no diagnosis credit even if healthy."""
+    r = _call(system_healthy=True, submitted_service="api-gw",
+              progress_state_visits=3, remediation_count=3,
+              observation_after_fix=3, execute_runbook_count=3,
+              discovered_before_action=3, unique_remediation_count=3)
+    # api-gw is 2 hops from root-db in failure propagation, so not adjacent.
+    # Diagnosis loses service credit (0.05) but keeps type (0.025) + keywords (0.025) = 0.05
+    # Exit 0.40 + Progress 0.20 + Diagnosis 0.05 + Eff 0.10 + Disc 0.10 + Traps 0.05 + Div 0.05 = 0.95
+    assert 0.93 < r < 0.97
 
 
-def test_chain_random_services_score_zero():
-    """Random chain not starting with root → 0."""
-    r = compute_reward(**{**BASE,
-        "submitted_chain": ["mid-svc", "api-gw", "unrelated"]})
-    r_no = compute_reward(**{**BASE})
-    assert r == r_no  # no chain credit
-
-
-# ─── Component 5: Investigation Efficiency ───────────────────────────
-
-def test_efficiency_no_waste():
-    r = compute_reward(**{**BASE,
-        "tool_call_history": [
-            ("read_logs", "root-db"), ("check_metric", "root-db"),
-            ("read_logs", "mid-svc"), ("check_metric", "mid-svc"),
-        ]})
-    r_no_hist = compute_reward(**{**BASE, "tool_call_history": []})
-    assert r > r_no_hist
-
-
-def test_efficiency_penalizes_duplicates():
-    r_clean = compute_reward(**{**BASE,
-        "tool_call_history": [
-            ("read_logs", "root-db"), ("check_metric", "root-db"),
-            ("read_logs", "mid-svc"),
-        ]})
-    r_dupes = compute_reward(**{**BASE,
-        "tool_call_history": [
-            ("read_logs", "root-db"), ("read_logs", "root-db"),
-            ("read_logs", "root-db"),
-        ]})
-    assert r_clean > r_dupes
-
-
-def test_efficiency_requires_min_investigation():
-    """Submitting after 0-1 queries = rushed = 0 efficiency."""
-    r = compute_reward(**{**BASE,
-        "tool_call_history": [("read_logs", "root-db")]})
-    r2 = compute_reward(**{**BASE, "tool_call_history": []})
-    assert r == r2  # both get 0 efficiency (< 2 calls)
-
-
-def test_efficiency_not_gated_on_service():
-    """Efficiency rewards process even with wrong diagnosis."""
-    r = compute_reward(**{**BASE, "submitted_service": "wrong",
-        "tool_call_history": [
-            ("read_logs", "root-db"), ("check_metric", "root-db"),
-            ("read_logs", "mid-svc"),
-        ]})
-    assert r > 0.0  # gets efficiency + breadth even with wrong service
-
-
-# ─── Component 6: Investigation Breadth ──────────────────────────────
-
-def test_breadth_rewards_relevant():
-    r_relevant = compute_reward(**{**BASE,
-        "services_queried": {"root-db", "mid-svc", "api-gw"},
-        "tool_call_history": [("read_logs", "root-db"), ("read_logs", "mid-svc"), ("read_logs", "api-gw")]})
-    r_irrelevant = compute_reward(**{**BASE,
-        "services_queried": {"unrelated"},
-        "tool_call_history": [("read_logs", "unrelated"), ("read_logs", "unrelated")]})
-    assert r_relevant > r_irrelevant
-
-
-def test_breadth_focused_beats_unfocused():
-    """Querying relevant services scores better than querying irrelevant ones."""
-    history = [("read_logs", "root-db"), ("check_metric", "root-db"),
-               ("read_logs", "mid-svc"), ("check_metric", "mid-svc")]
-    # Focused: queried causal chain services
-    r_focused = compute_reward(**{**BASE,
-        "services_queried": {"root-db", "mid-svc"},
-        "tool_call_history": history})
-    # Unfocused: queried only irrelevant services
-    history_bad = [("read_logs", "unrelated"), ("check_metric", "unrelated"),
-                   ("read_logs", "unrelated"), ("check_metric", "unrelated")]
-    r_unfocused = compute_reward(**{**BASE,
-        "services_queried": {"unrelated"},
-        "tool_call_history": history_bad})
-    assert r_focused > r_unfocused
-
-
-def test_breadth_not_gated_on_service():
-    r = compute_reward(**{**BASE, "submitted_service": "wrong",
-        "services_queried": {"root-db", "mid-svc"},
-        "tool_call_history": [("read_logs", "root-db"), ("read_logs", "mid-svc")]})
-    assert r > 0.0
-
-
-# ─── Overall Properties ─────────────────────────────────────────────
-
-def test_reward_range():
-    for svc in ["root-db", "wrong", "mid-svc"]:
-        r = compute_reward(**{**BASE, "submitted_service": svc})
-        assert 0.0 <= r <= 1.0
-
-
-def test_reward_never_exceeds_one():
-    r = compute_reward(**{**BASE,
-        "submitted_failure_type": "config_drift", "true_failure_type": "config_drift",
-        "submitted_chain": ["root-db", "mid-svc", "api-gw"],
-        "services_queried": {"root-db", "mid-svc", "api-gw"},
-        "tool_call_history": [("read_logs", "root-db"), ("check_metric", "root-db"),
-                              ("read_logs", "mid-svc"), ("check_metric", "api-gw")]})
-    assert r <= 1.0
-
-
-def test_gradient_exists():
-    """Reward must increase: wrong < adjacent < correct < +type < +explanation."""
-    r_wrong = compute_reward(**{**BASE, "submitted_service": "wrong", "tool_call_history": []})
-    r_adj = compute_reward(**{**BASE, "submitted_service": "mid-svc", "tool_call_history": []})
-    r_svc = compute_reward(**{**BASE, "tool_call_history": []})
-    r_type = compute_reward(**{**BASE, "submitted_failure_type": "config_drift",
-        "true_failure_type": "config_drift", "tool_call_history": []})
-    assert r_wrong < r_adj < r_svc < r_type
+def test_reward_strictly_in_valid_range():
+    """Phase 2 validator requires reward strictly in (0, 1)."""
+    r = _call()
+    assert 0.0 < r < 1.0
+    r_perfect = _call(system_healthy=True,
+                      progress_state_visits=3, remediation_count=3,
+                      observation_after_fix=3, execute_runbook_count=3,
+                      discovered_before_action=3, unique_remediation_count=3)
+    assert 0.0 < r_perfect < 1.0

@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 
 
 class ScenarioLoader:
-    def __init__(self, registry_path: str = "scenarios/incidents.jsonl"):
+    def __init__(self, registry_path: str = "scenarios/incidents_v3.jsonl"):
         self.scenarios: List[Dict[str, Any]] = []
         self._load(registry_path)
         custom = os.environ.get("OPENENV_CUSTOM_REGISTRY")

@@ -38,20 +38,12 @@ class SREIncidentEnvironment(MCPEnvironment):
         self._register_tools(mcp)
         super().__init__(mcp)
 
-        # Scenario file: env var override > v3 > v2 > v1
+        # Scenario file: env var override > v3
         override = os.environ.get("SCENARIO_FILE")
         if override and Path(override).exists():
             scenario_path = Path(override)
         else:
-            v3_path = Path(__file__).parent.parent / "scenarios" / "incidents_v3.jsonl"
-            v2_path = Path(__file__).parent.parent / "scenarios" / "incidents_v2.jsonl"
-            v1_path = Path(__file__).parent.parent / "scenarios" / "incidents.jsonl"
-            if v3_path.exists():
-                scenario_path = v3_path
-            elif v2_path.exists():
-                scenario_path = v2_path
-            else:
-                scenario_path = v1_path
+            scenario_path = Path(__file__).parent.parent / "scenarios" / "incidents_v3.jsonl"
         self.loader = ScenarioLoader(str(scenario_path))
 
         # Episode state

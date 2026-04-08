@@ -8,24 +8,24 @@ from server.scenario_loader import ScenarioLoader
 
 
 def test_load_builtin():
-    loader = ScenarioLoader("scenarios/incidents.jsonl")
+    loader = ScenarioLoader("scenarios/incidents_v3.jsonl")
     assert len(loader.scenarios) >= 5
 
 
 def test_sample_by_difficulty():
-    loader = ScenarioLoader("scenarios/incidents.jsonl")
+    loader = ScenarioLoader("scenarios/incidents_v3.jsonl")
     s = loader.sample(difficulty="easy")
     assert s["difficulty"] == "easy"
 
 
 def test_sample_by_id():
-    loader = ScenarioLoader("scenarios/incidents.jsonl")
+    loader = ScenarioLoader("scenarios/incidents_v3.jsonl")
     s = loader.sample(scenario_id=loader.scenarios[0]["id"])
     assert s["id"] == loader.scenarios[0]["id"]
 
 
 def test_sample_unknown_id():
-    loader = ScenarioLoader("scenarios/incidents.jsonl")
+    loader = ScenarioLoader("scenarios/incidents_v3.jsonl")
     with pytest.raises(ValueError, match="not found"):
         loader.sample(scenario_id="nonexistent_id")
 
@@ -59,7 +59,7 @@ def test_custom_registry():
 
 
 def test_list_difficulties():
-    loader = ScenarioLoader("scenarios/incidents.jsonl")
+    loader = ScenarioLoader("scenarios/incidents_v3.jsonl")
     diffs = loader.list_difficulties()
     assert "easy" in diffs
     assert all(v > 0 for v in diffs.values())
