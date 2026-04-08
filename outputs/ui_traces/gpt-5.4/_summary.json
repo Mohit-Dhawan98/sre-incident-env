@@ -1,0 +1,104 @@
+{
+  "model": "gpt-5.4",
+  "scenario_file": "scenarios/incidents_v3.jsonl",
+  "max_steps": 200,
+  "timestamp": "2026-04-08T11:35:51.022508",
+  "results": [
+    {
+      "scenario_id": "jvm_metaspace_classloader_leak_001",
+      "difficulty": "easy",
+      "model": "gpt-5.4",
+      "run": 1,
+      "reward": 0.8636,
+      "done": true,
+      "steps": 34,
+      "elapsed_seconds": 97.1,
+      "error": null,
+      "max_steps_hit": false
+    },
+    {
+      "scenario_id": "etcd_compaction_quota_alarm_001",
+      "difficulty": "easy",
+      "model": "gpt-5.4",
+      "run": 1,
+      "reward": 0.3089,
+      "done": true,
+      "steps": 37,
+      "elapsed_seconds": 83.7,
+      "error": null,
+      "max_steps_hit": false
+    },
+    {
+      "scenario_id": "kafka_partition_rebalance_storm_001",
+      "difficulty": "medium",
+      "model": "gpt-5.4",
+      "run": 1,
+      "reward": 0.35,
+      "done": true,
+      "steps": 28,
+      "elapsed_seconds": 62.0,
+      "error": null,
+      "max_steps_hit": false
+    },
+    {
+      "scenario_id": "cpu_microcode_tsc_drift_001",
+      "difficulty": "medium",
+      "model": "gpt-5.4",
+      "run": 1,
+      "reward": 0.8888,
+      "done": true,
+      "steps": 27,
+      "elapsed_seconds": 59.6,
+      "error": null,
+      "max_steps_hit": false
+    },
+    {
+      "scenario_id": "cert_expiry_mutual_tls_001",
+      "difficulty": "medium",
+      "model": "gpt-5.4",
+      "run": 1,
+      "reward": 0.3406,
+      "done": true,
+      "steps": 19,
+      "elapsed_seconds": 41.6,
+      "error": null,
+      "max_steps_hit": false
+    },
+    {
+      "scenario_id": "numa_cross_socket_latency_001",
+      "difficulty": "hard",
+      "model": "gpt-5.4",
+      "run": 1,
+      "reward": 0.8977,
+      "done": true,
+      "steps": 39,
+      "elapsed_seconds": 90.6,
+      "error": null,
+      "max_steps_hit": false
+    },
+    {
+      "scenario_id": "kernel_tcp_rmem_silent_drop_001",
+      "difficulty": "hard",
+      "model": "gpt-5.4",
+      "run": 1,
+      "reward": 0.1753,
+      "done": true,
+      "steps": 28,
+      "elapsed_seconds": 81.8,
+      "error": null,
+      "max_steps_hit": false
+    },
+    {
+      "scenario_id": "wal_archive_disk_full_h002",
+      "difficulty": "hard",
+      "model": "gpt-5.4",
+      "run": 1,
+      "reward": 0.025,
+      "done": true,
+      "steps": 38,
+      "elapsed_seconds": 79.5,
+      "error": null,
+      "max_steps_hit": false
+    }
+  ]
+}

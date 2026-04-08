@@ -1,0 +1,20 @@
+{
+  "model": "o4-mini",
+  "scenario_file": "scenarios/incidents_v3.jsonl",
+  "max_steps": 200,
+  "timestamp": "2026-04-08T12:33:54.845743",
+  "results": [
+    {
+      "scenario_id": "wal_archive_disk_full_h002",
+      "difficulty": "hard",
+      "model": "o4-mini",
+      "run": 1,
+      "reward": null,
+      "done": false,
+      "steps": 12,
+      "elapsed_seconds": 94.7,
+      "error": "API error: Error code: 400 - {'error': {'message': 'Could not finish the message because max_tokens or model output limit was reached. Please try again with higher max_tokens.', 'type': 'invalid_request_error', ",
+      "max_steps_hit": false
+    }
+  ]
+}

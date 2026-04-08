@@ -15,7 +15,10 @@ import asyncio
 import uvicorn
 from typing import Any, Dict, Optional
 
+from pathlib import Path
+
 from fastapi import Body, HTTPException
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from openenv.core.env_server import create_app
 from openenv.core.env_server.mcp_types import CallToolAction, CallToolObservation
@@ -30,6 +33,15 @@ app = create_app(
     env_name="sre_incident_env",
     max_concurrent_envs=5,
 )
+
+# Mount pre-generated state-graph SVGs as static assets
+_state_graph_dir = Path(__file__).resolve().parent.parent / "outputs" / "state_graphs"
+if _state_graph_dir.exists():
+    app.mount(
+        "/state_graphs",
+        StaticFiles(directory=str(_state_graph_dir)),
+        name="state_graphs",
+    )
 
 
 # ─── HTTP Session Management ─────────────────────────────────
@@ -142,6 +154,23 @@ async def api_close(body: CloseBody):
 
     env.close()
     return {"closed": True, "session_id": body.session_id}
+
+
+# ── Mount Gradio landing UI at '/' ──────────────────────────
+# Replaces the default openenv inspector with a custom on-call war-room
+# themed dashboard showing scenarios, leaderboard, and agent traces.
+# MCP endpoints (/reset, /step, /ws, /health, /mcp/*) remain unchanged.
+try:
+    import gradio as gr
+    from server.gradio_landing import create_landing_app
+
+    _landing_app = create_landing_app()
+    app = gr.mount_gradio_app(app, _landing_app, path="/")
+except Exception as _mount_err:  # pragma: no cover - defensive
+    import logging
+    logging.getLogger(__name__).warning(
+        "Gradio landing mount failed: %s — falling back to default UI", _mount_err
+    )
 
 
 def main() -> None:

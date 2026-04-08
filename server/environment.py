@@ -385,13 +385,14 @@ class SREIncidentEnvironment(MCPEnvironment):
             if self._state_machine:
                 system_state = self._state_machine.system_state
 
+            verdict = "SOLVED" if system_healthy else "NOT SOLVED"
             return json.dumps({
                 "result": "resolution_verified",
                 "system_state": system_state,
                 "system_healthy": system_healthy,
                 "reward": reward,
                 "done": True,
-                "message": f"Resolution verified. System: {system_state}. Reward: {reward:.4f}",
+                "message": f"[{verdict}] System state: {system_state}. Reward: {reward:.4f}",
             })
 
     # ─── HELPERS ───────────────────────────────────────────────

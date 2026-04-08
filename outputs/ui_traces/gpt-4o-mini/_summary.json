@@ -1,0 +1,56 @@
+{
+  "model": "gpt-4o-mini",
+  "scenario_file": "scenarios/incidents_v3.jsonl",
+  "max_steps": 200,
+  "timestamp": "2026-04-08T13:59:18.999412",
+  "results": [
+    {
+      "scenario_id": "cert_expiry_mutual_tls_001",
+      "difficulty": "medium",
+      "model": "gpt-4o-mini",
+      "run": 1,
+      "reward": 0.1317,
+      "done": true,
+      "steps": 28,
+      "elapsed_seconds": 68.6,
+      "error": null,
+      "max_steps_hit": false
+    },
+    {
+      "scenario_id": "jvm_metaspace_classloader_leak_001",
+      "difficulty": "easy",
+      "model": "gpt-4o-mini",
+      "run": 1,
+      "reward": 0.1225,
+      "done": true,
+      "steps": 36,
+      "elapsed_seconds": 70.4,
+      "error": null,
+      "max_steps_hit": false
+    },
+    {
+      "scenario_id": "kernel_tcp_rmem_silent_drop_001",
+      "difficulty": "hard",
+      "model": "gpt-4o-mini",
+      "run": 1,
+      "reward": null,
+      "done": false,
+      "steps": 200,
+      "elapsed_seconds": 659.7,
+      "error": null,
+      "max_steps_hit": true
+    },
+    {
+      "scenario_id": "wal_archive_disk_full_h002",
+      "difficulty": "hard",
+      "model": "gpt-4o-mini",
+      "run": 1,
+      "reward": 0.025,
+      "done": true,
+      "steps": 17,
+      "elapsed_seconds": 45.2,
+      "error": null,
+      "max_steps_hit": false
+    }
+  ]
+}

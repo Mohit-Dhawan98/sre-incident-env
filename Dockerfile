@@ -20,7 +20,8 @@ RUN pip install --no-cache-dir \
     "openai>=2.7.2" \
     "requests>=2.31.0" \
     "python-dotenv" \
-    "httpx>=0.27.0"
+    "httpx>=0.27.0" \
+    "gradio>=4.44.0"
 
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH="/app"
