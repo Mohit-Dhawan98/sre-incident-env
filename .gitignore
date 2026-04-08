@@ -18,7 +18,10 @@ benchmarks/
 
 # Extra scenarios (parked for now)
 scenarios/incidents_extra.jsonl
-outputs/
+outputs/*
+# Exceptions — UI assets that must ship to HF Space
+!outputs/state_graphs/
+!outputs/ui_traces/
 benchmarks/
 *.log
 scenarios/incidents.jsonl
