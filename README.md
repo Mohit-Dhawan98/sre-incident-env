@@ -15,6 +15,79 @@ The environment is a **state-graph maze** — the agent navigates through broken
 
 Fully deterministic reward, zero LLM calls at runtime.
 
+## What makes this environment unique
+
+1. **Real production incident patterns.** Scenarios are drawn from actual post-mortems: kernel TCP `rmem_max` silent packet drops, CPU microcode TSC drift destabilizing Raft consensus, JVM classloader metaspace leaks, NUMA cross-socket memory migration, WAL archiver disk exhaustion, etcd backend quota alarms, Kafka/Zookeeper partition rebalance storms, mutual-TLS cert expiry with broken ACME renewal.
+
+2. **Full SRE-stack breadth.** Scenarios span kernel networking, CPU and hardware, JVM internals, Postgres WAL, etcd/Raft, Kafka/Zookeeper, TLS/PKI, and Kubernetes API server failures — the agent is exposed to the full layer stack an on-call engineer actually sees.
+
+3. **Realistic SRE tool interface.** Nine MCP tools mirror a real on-call toolkit: `list_services`, `read_logs(level_filter)`, `check_metric`, `get_service_info` (runbook), `restart_service`, `rollback_deploy`, `scale_replicas`, `execute_runbook`, `verify_resolution`. The agent investigates the way a human SRE does.
+
+4. **Multi-step cross-service remediation.** Every scenario requires 4–5 sequential correct actions across multiple services — typically root-cause service → affected services → cleanup → prevention step. Wrong actions trigger `worsened` state transitions that move the system backward, mirroring real production where the wrong fix makes things worse.
+
+5. **State-graph maze with trap actions.** Each scenario is a directed graph of system states with `progress` / `no_effect` / `worsened` / `recovery` transitions. Partial credit is awarded quadratically based on BFS depth along the optimal path, so an agent that executes 3 of 4 correct steps gets smooth partial credit — not a binary fixed/not-fixed signal.
+
+6. **Frontier-model difficulty gradient verified.** The hardest scenario (`wal_archive_disk_full_h002`) scores 0.04 average across GPT-5.4, o4-mini, and GPT-4o-mini — genuinely floors frontier models and leaves meaningful headroom for better agents.
+
+### Example: `etcd_compaction_quota_alarm_001` state graph
+
+The etcd scenario shows what a "simple" 5-step resolution actually looks like. `backup-agent` retention was auto-pushed from 24h to 720h, filling etcd's 8GB backend quota and triggering `ALARM:NOSPACE`, which makes the k8s API server read-only.
+
+```
+                           ┌────────────────────────────────────┐
+                           │              broken                │
+                           │ (retention=720h, DB=8GB, ALARM on) │
+                           └────────────────────────────────────┘
+                              │         │              │
+           update_config(     │         │ trigger_     │ restart_service(
+           backup-agent,      │         │ compaction(  │ etcd-cluster)
+           retention=24)      │         │ etcd)        │      ▼
+                  ▼           │         ▼              │  ┌──────────────┐
+          ┌───────────────────┴─┐  ┌─────────────────┐ │  │ etcd_crashed │  ◄── TRAP
+          │  retention_fixed    │  │ partially_      │ │  │  (worsened)  │
+          │ (95GB old snaps     │  │ compacted       │ │  └──────────────┘
+          │  still on disk)    │  │ (will refill)   │ │
+          └──────────────────────┘  └─────────────────┘ │
+                  │                         │           │
+         cleanup_old_snapshots       update_config(      │
+         (backup-agent)              backup-agent)       │
+                  ▼                         ▼           │
+          ┌──────────────────┐              │           │
+          │ snapshots_       │              │           │
+          │ cleaned          │◄─────────────┘           │
+          └──────────────────┘                          │
+                  │                                     │
+         trigger_compaction(etcd)                       │
+         or defragment(etcd)                            │
+                  ▼                                     │
+          ┌──────────────────┐                          │
+          │    compacted     │                          │
+          │ (DB=4GB, ALARM   │                          │
+          │  still armed)    │                          │
+          └──────────────────┘                          │
+                  │                                     │
+         disarm_alarm(etcd)                             │
+                  ▼                                     │
+          ┌──────────────────┐                          │
+          │  alarm_cleared   │                          │
+          │ (28 pods pending)│                          │
+          └──────────────────┘                          │
+                  │                                     │
+         resume_scheduling(kube-scheduler)              │
+                  ▼                                     │
+          ┌──────────────────┐                          │
+          │     HEALTHY      │◄─────────────────────────┘
+          └──────────────────┘
+```
+
+**What the agent must figure out:**
+- The loud service (`k8s-apiserver` throwing write errors) is a victim, not the cause. The cause is `backup-agent` having its retention auto-pushed to 720h.
+- The fix is **5 steps across 3 different services** (backup-agent → etcd-cluster → kube-scheduler), in a specific order. Skipping the retention fix causes storage to refill. Skipping the ALARM disarm leaves etcd rejecting writes. Skipping scheduler resume leaves 28 pods stuck.
+- Restart actions on `etcd-cluster` are **trap doors** that cause quorum loss and make recovery harder.
+- Partial credit is awarded via BFS depth on the optimal path: the agent that reaches `snapshots_cleaned` (depth 2) gets quadratically more than one that only reaches `retention_fixed` (depth 1).
+
+All 8 scenarios have similar 4–5 step state graphs with trap actions. The environment is fundamentally a **maze**, not a flat task list.
+
 ## Baseline Scores
 
 Benchmarks against the deployed HF Space (8 scenarios × 2 runs = 16 episodes per model, except o4-mini at 1 run per scenario).
