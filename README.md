@@ -192,7 +192,7 @@ The agent discovers direction by **observing** (read_logs, check_metric) after e
 
 **State**: `episode_id`, `step_count`, `scenario_id`, `difficulty`, `queries_used`, `query_budget`
 
-## Reward Function (V3)
+## Reward Function
 
 ### 7 components, quadratic partial progress (perfect = 1.00)
 
@@ -280,7 +280,7 @@ Inference output follows the Hackathon Phase 2 structured format:
 
 - **Environment server**: MCPEnvironment (FastMCP) with 9 MCP tools, HTTP transport
 - **State machine**: Graph-based traversal with per-state action tables, max-progress-depth tracking for partial credit
-- **Reward**: V3 7-component, fully deterministic, quadratic partial progress
+- **Reward**: 7-component, fully deterministic, quadratic partial progress
 - **Scenarios**: 8 hardened production incidents (2 easy + 3 medium + 3 hard), 50 states, 159 actions
 - **Client**: `SREIncidentEnvHTTP` (async, HTTP transport — robust through HF Space proxy)
 - **Inference**: OpenAI function calling via `openai` client, smart context summarization, per-episode session isolation
