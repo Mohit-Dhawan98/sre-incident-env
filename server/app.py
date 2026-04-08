@@ -166,11 +166,13 @@ try:
 
     _landing_app = create_landing_app()
     app = gr.mount_gradio_app(app, _landing_app, path="/")
+    print(f"[gradio_landing] mounted at / — gradio version {gr.__version__}", flush=True)
 except Exception as _mount_err:  # pragma: no cover - defensive
-    import logging
-    logging.getLogger(__name__).warning(
-        "Gradio landing mount failed: %s — falling back to default UI", _mount_err
-    )
+    import sys
+    import traceback
+    print(f"[gradio_landing] MOUNT FAILED: {type(_mount_err).__name__}: {_mount_err}", file=sys.stderr, flush=True)
+    traceback.print_exc(file=sys.stderr)
+    sys.stderr.flush()
 
 
 def main() -> None:
