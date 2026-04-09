@@ -856,7 +856,9 @@ def _hero_html() -> str:
   <h1>SRE Incident Response Environment</h1>
   <p class="hero-sub">A state-graph maze where LLM agents investigate, diagnose, and
   resolve production incidents across a full SRE stack — from kernel networking
-  to distributed consensus to TLS/PKI. Scenarios based on real post-mortems.</p>
+  to distributed consensus to TLS/PKI. Scenarios based on real post-mortems.
+  Parameter randomization on every reset prevents memorization — agents must
+  learn the pattern, not specific names.</p>
   <div class="hero-stats">
     <div class="stat"><div class="k">Scenarios</div><div class="v">{len(scenarios)}</div></div>
     <div class="stat"><div class="k">State Nodes</div><div class="v">{total_states}</div></div>
