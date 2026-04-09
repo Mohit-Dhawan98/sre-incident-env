@@ -9,9 +9,11 @@ app_port: 8000
 
 # SRE Incident Response Environment
 
+**The only SRE environment where agents must execute multi-step remediation through a state-graph maze with trap actions — not just diagnose.**
+
 An OpenEnv RL environment that simulates the full on-call SRE lifecycle: investigate a production incident across a multi-service architecture, diagnose the root cause, apply multi-step remediation (where wrong actions make things worse), and verify resolution.
 
-The environment is a **state-graph maze** — the agent navigates through broken, degraded, and critical states to reach healthy. 8 real-world production incidents across 3 difficulty tiers. 50 states, 159 actions, trap doors at intermediate states.
+8 real-world production incidents across 3 difficulty tiers. 50 states, 159 actions, trap doors at intermediate states. 64K+ unique instances per scenario via parameter randomization. 4 frontier models baselined (GPT-5.4, Claude Sonnet 4.6, o4-mini, GPT-4o-mini).
 
 Fully deterministic reward, zero LLM calls at runtime.
 
@@ -27,7 +29,7 @@ Fully deterministic reward, zero LLM calls at runtime.
 
 5. **State-graph maze with trap actions.** Each scenario is a directed graph of system states with `progress` / `no_effect` / `worsened` / `recovery` transitions. Partial credit is awarded quadratically based on BFS depth along the optimal path, so an agent that executes 3 of 4 correct steps gets smooth partial credit — not a binary fixed/not-fixed signal.
 
-6. **Frontier-model difficulty gradient verified.** The hardest scenario (`wal_archive_disk_full_h002`) scores 0.04 average across GPT-5.4, o4-mini, and GPT-4o-mini — genuinely floors frontier models and leaves meaningful headroom for better agents.
+6. **Frontier-model difficulty gradient verified across providers.** 4 frontier models baselined (GPT-5.4, Claude Sonnet 4.6, o4-mini, GPT-4o-mini). Different models have different strengths — Claude solved `wal_archive` (0.81) which floors all OpenAI models. The hardest scenarios genuinely challenge frontier models and leave meaningful headroom for better agents.
 
 ### Example: `etcd_compaction_quota_alarm_001` state graph
 
@@ -90,34 +92,35 @@ All 8 scenarios have similar 4–5 step state graphs with trap actions. The envi
 
 ## Baseline Scores
 
-Benchmarks against the deployed HF Space (8 scenarios × 2 runs = 16 episodes per model, except o4-mini at 1 run per scenario).
+Benchmarks against the deployed HF Space. Each cell is the per-scenario average across runs.
 
-| Scenario | Tier | gpt-5.4 | o4-mini | gpt-4o-mini |
-|---|---|---|---|---|
-| `jvm_metaspace_classloader_leak_001` | easy | 0.59 | 0.89 | 0.17 |
-| `etcd_compaction_quota_alarm_001` | easy | 0.60 | 0.00 | 0.05 |
-| `kafka_partition_rebalance_storm_001` | medium | 0.34 | 0.27 | 0.00 |
-| `cpu_microcode_tsc_drift_001` | medium | 0.30 | 0.23 | 0.16 |
-| `cert_expiry_mutual_tls_001` | medium | 0.33 | 0.84 | 0.33 |
-| `numa_cross_socket_latency_001` | hard | 0.89 | 0.13 | 0.14 |
-| `kernel_tcp_rmem_silent_drop_001` | hard | 0.51 | 0.17 | 0.01 |
-| `wal_archive_disk_full_h002` | hard | 0.04 | 0.00 | 0.00 |
+| Scenario | Tier | gpt-5.4 | claude-sonnet-4-6 | o4-mini | gpt-4o-mini |
+|---|---|---|---|---|---|
+| `jvm_metaspace_classloader_leak_001` | easy | 0.59 | 0.27 | 0.89 | 0.17 |
+| `etcd_compaction_quota_alarm_001` | easy | 0.60 | 0.29 | 0.00 | 0.05 |
+| `kafka_partition_rebalance_storm_001` | medium | 0.34 | 0.28 | 0.27 | 0.00 |
+| `cpu_microcode_tsc_drift_001` | medium | 0.30 | 0.57 | 0.23 | 0.16 |
+| `cert_expiry_mutual_tls_001` | medium | 0.33 | 0.26 | 0.84 | 0.33 |
+| `numa_cross_socket_latency_001` | hard | 0.89 | 0.88 | 0.13 | 0.14 |
+| `kernel_tcp_rmem_silent_drop_001` | hard | 0.51 | 0.20 | 0.17 | 0.01 |
+| `wal_archive_disk_full_h002` | hard | 0.04 | **0.81** | 0.00 | 0.00 |
 
 ### Tier averages
 
-| Tier | gpt-5.4 | o4-mini | gpt-4o-mini |
-|---|---|---|---|
-| **easy** | 0.595 | 0.447 | 0.110 |
-| **medium** | 0.322 | 0.447 | 0.165 |
-| **hard** | 0.478 | 0.100 | 0.049 |
-| **OVERALL** | **0.449** | **0.317** | **0.108** |
+| Tier | gpt-5.4 | claude-sonnet-4-6 | o4-mini | gpt-4o-mini |
+|---|---|---|---|---|
+| **easy** | 0.595 | 0.280 | 0.447 | 0.110 |
+| **medium** | 0.322 | 0.370 | 0.447 | 0.165 |
+| **hard** | 0.478 | 0.630 | 0.100 | 0.049 |
+| **OVERALL** | **0.449** | **0.445** | **0.317** | **0.108** |
 
 **Observations:**
-- gpt-5.4 is the strongest overall. Solves `numa_cross_socket_latency` consistently (0.89) and picks up partial progress on every scenario.
-- o4-mini (reasoning) has high run-to-run variance — when it commits to the right hypothesis it solves (jvm 0.89, cert_expiry 0.84), when it gets stuck in re-exploration it floors (etcd 0.00, kernel_tcp 0.17).
-- gpt-4o-mini is the weak floor: consistently <0.20 on every scenario. Useful as a sanity-check baseline.
-- `wal_archive_disk_full_h002` is the hardest scenario — unsolved by all three models. `kernel_tcp_rmem_silent_drop_001` is a close second.
-- Gemini 2.5 Pro/Flash were tested but fail to converge on the multi-step tool-call protocol (Pro hit 503 rate limits; Flash looped on a single `rollback_deploy` call for 170+ steps). Excluded from baseline.
+- Different frontier models have different strengths — proving the environment genuinely differentiates model capabilities.
+- **Claude Sonnet 4.6 solved `wal_archive_disk_full_h002` (0.81)** — the scenario that floors all three OpenAI models at 0.00–0.04. Also strong on `cpu_microcode_tsc_drift` (0.57) and `numa` (0.88).
+- **gpt-5.4** is strongest overall. Consistently picks up partial progress on every scenario.
+- **o4-mini** (reasoning) shows extreme variance — solves jvm (0.89) and cert_expiry (0.84) but floors on etcd and wal_archive.
+- **gpt-4o-mini** is the weak floor: consistently <0.20. Useful as a sanity-check baseline.
+- Gemini 2.5 Pro/Flash were tested but fail to converge on the multi-step tool-call protocol. Excluded from baseline.
 
 ## Quick Start
 
