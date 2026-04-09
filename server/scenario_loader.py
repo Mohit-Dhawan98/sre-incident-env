@@ -6,6 +6,8 @@ import random
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from server.scenario_resolver import resolve_scenario
+
 
 class ScenarioLoader:
     def __init__(self, registry_path: str = "scenarios/incidents_v3.jsonl"):
@@ -46,19 +48,31 @@ class ScenarioLoader:
         self,
         difficulty: Optional[str] = None,
         scenario_id: Optional[str] = None,
+        seed: Optional[int] = None,
     ) -> Dict[str, Any]:
+        """Sample a scenario, optionally applying parameter randomization.
+
+        Args:
+            difficulty: Filter by tier (easy/medium/hard).
+            scenario_id: Select a specific scenario by ID.
+            seed: Randomization seed for anti-memorization.
+                  None or 0 = original scenario (backward compat).
+                  Any positive int = deterministic randomized variant.
+        """
         if scenario_id:
             matches = [s for s in self.scenarios if s["id"] == scenario_id]
             if not matches:
                 raise ValueError(f"Scenario ID not found: {scenario_id}")
-            return matches[0]
-        if difficulty:
+            raw = matches[0]
+        elif difficulty:
             pool = [s for s in self.scenarios if s["difficulty"] == difficulty]
+            if not pool:
+                pool = self.scenarios
+            raw = random.choice(pool)
         else:
-            pool = self.scenarios
-        if not pool:
-            pool = self.scenarios
-        return random.choice(pool)
+            raw = random.choice(self.scenarios)
+
+        return resolve_scenario(raw, seed=seed)
 
     def list_difficulties(self) -> Dict[str, int]:
         counts: Dict[str, int] = {}
