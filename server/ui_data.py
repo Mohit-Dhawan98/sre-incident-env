@@ -20,7 +20,7 @@ LEADERBOARD_LOG_DIR = ROOT / "outputs" / "hf_bench_v2"
 LEADERBOARD_JSON = ROOT / "outputs" / "leaderboard" / "scores.json"
 TRACE_DIR = ROOT / "outputs" / "ui_traces"
 
-MODELS = ["gpt-5.4", "o4-mini", "gpt-4o-mini"]
+MODELS = ["gpt-5.4", "claude-sonnet-4-6", "o4-mini", "gpt-4o-mini"]
 
 TIER_COLOR = {
     "easy":   "#06b6d4",  # cyan

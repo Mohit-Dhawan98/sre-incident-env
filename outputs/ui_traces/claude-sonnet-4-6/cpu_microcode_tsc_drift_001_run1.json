@@ -1,0 +1,664 @@
+{
+  "summary": {
+    "scenario_id": "cpu_microcode_tsc_drift_001",
+    "difficulty": "medium",
+    "model": "claude-sonnet-4-6",
+    "run": 1,
+    "reward": 0.2792,
+    "done": true,
+    "steps": 32,
+    "elapsed_seconds": 52.8,
+    "error": null,
+    "max_steps_hit": false
+  },
+  "trace": [
+    {
+      "role": "system",
+      "content": "You are an expert on-call SRE. Investigate the incident, fix it, verify resolution.\nUse list_services, read_logs, check_metric, get_service_info to investigate.\nUse restart_service, rollback_deploy, scale_replicas, execute_runbook to fix.\nCall verify_resolution when the system is healthy."
+    },
+    {
+      "role": "user",
+      "content": "[INCIDENT ALERT] [P0] Leader election instability and distributed consensus failures across clusters\nSeverity detected. Investigate using the available tools.\nUse list_services to see the topology, then read_logs and check_metric to investigate.\nUse get_service_info to discover available actions on each service.\nApply fixes with restart_service, rollback_deploy, scale_replicas, or execute_runbook.\nCall verify_resolution when the system is healthy."
+    },
+    {
+      "role": "assistant",
+      "_step": 1,
+      "tool_calls": [
+        {
+          "id": "toolu_015WpkEkZWYhSfcZzYtSet7V",
+          "type": "function",
+          "function": {
+            "name": "list_services",
+            "arguments": "{}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_015WpkEkZWYhSfcZzYtSet7V",
+      "content": "{\"services\": [\"health-monitor\", \"client-lb\", \"consensus-service\", \"tsc-firmware\", \"state-store\", \"audit-log\", \"cache-proxy\", \"scheduler-service\", \"api-gateway\"]}",
+      "_step": 1
+    },
+    {
+      "role": "assistant",
+      "_step": 2,
+      "tool_calls": [
+        {
+          "id": "toolu_01EWtGgo2fyn9Lh1xZyAedsy",
+          "type": "function",
+          "function": {
+            "name": "read_logs",
+            "arguments": "{\"service\": \"consensus-service\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_01EWtGgo2fyn9Lh1xZyAedsy",
+      "content": "{\"logs\": [], \"message\": \"No logs found for service 'consensus-service'\"}",
+      "_step": 2
+    },
+    {
+      "role": "assistant",
+      "_step": 3,
+      "tool_calls": [
+        {
+          "id": "toolu_015uZXmeaGVBMTi4pXY3ev38",
+          "type": "function",
+          "function": {
+            "name": "read_logs",
+            "arguments": "{\"service\": \"state-store\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_015uZXmeaGVBMTi4pXY3ev38",
+      "content": "{\"logs\": [], \"message\": \"No logs found for service 'state-store'\"}",
+      "_step": 3
+    },
+    {
+      "role": "assistant",
+      "_step": 4,
+      "tool_calls": [
+        {
+          "id": "toolu_0141JvsEgZ2myqpgJr45GRAE",
+          "type": "function",
+          "function": {
+            "name": "read_logs",
+            "arguments": "{\"service\": \"health-monitor\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_0141JvsEgZ2myqpgJr45GRAE",
+      "content": "{\"logs\": [], \"message\": \"No logs found for service 'health-monitor'\"}",
+      "_step": 4
+    },
+    {
+      "role": "assistant",
+      "_step": 5,
+      "tool_calls": [
+        {
+          "id": "toolu_01S5KAHHK3JUbznD4T1m1Y6o",
+          "type": "function",
+          "function": {
+            "name": "read_logs",
+            "arguments": "{\"service\": \"client-lb\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_01S5KAHHK3JUbznD4T1m1Y6o",
+      "content": "{\"logs\": [], \"message\": \"No logs found for service 'client-lb'\"}",
+      "_step": 5
+    },
+    {
+      "role": "assistant",
+      "_step": 6,
+      "tool_calls": [
+        {
+          "id": "toolu_01XgkrMfZnYicBUgxbPMg3zZ",
+          "type": "function",
+          "function": {
+            "name": "read_logs",
+            "arguments": "{\"service\": \"scheduler-service\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_01XgkrMfZnYicBUgxbPMg3zZ",
+      "content": "{\"logs\": [], \"message\": \"No logs found for service 'scheduler-service'\"}",
+      "_step": 6
+    },
+    {
+      "role": "assistant",
+      "_step": 7,
+      "tool_calls": [
+        {
+          "id": "toolu_01UACNJUiWd7PfAzBWZ7jfhL",
+          "type": "function",
+          "function": {
+            "name": "read_logs",
+            "arguments": "{\"service\": \"api-gateway\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_01UACNJUiWd7PfAzBWZ7jfhL",
+      "content": "{\"logs\": [], \"message\": \"No logs found for service 'api-gateway'\"}",
+      "_step": 7
+    },
+    {
+      "role": "assistant",
+      "_step": 8,
+      "tool_calls": [
+        {
+          "id": "toolu_019Cd4FpsDgbbkEUo5JQq13B",
+          "type": "function",
+          "function": {
+            "name": "read_logs",
+            "arguments": "{\"service\": \"tsc-firmware\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_019Cd4FpsDgbbkEUo5JQq13B",
+      "content": "{\"logs\": [], \"message\": \"No logs found for service 'tsc-firmware'\"}",
+      "_step": 8
+    },
+    {
+      "role": "assistant",
+      "_step": 9,
+      "tool_calls": [
+        {
+          "id": "toolu_017sGZT3HAvpwotxHmyhhQhh",
+          "type": "function",
+          "function": {
+            "name": "read_logs",
+            "arguments": "{\"service\": \"audit-log\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_017sGZT3HAvpwotxHmyhhQhh",
+      "content": "{\"logs\": [], \"message\": \"No logs found for service 'audit-log'\"}",
+      "_step": 9
+    },
+    {
+      "role": "assistant",
+      "_step": 10,
+      "tool_calls": [
+        {
+          "id": "toolu_01JotHfPXfPEWoKmhUBBooFD",
+          "type": "function",
+          "function": {
+            "name": "read_logs",
+            "arguments": "{\"service\": \"cache-proxy\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_01JotHfPXfPEWoKmhUBBooFD",
+      "content": "{\"logs\": [], \"message\": \"No logs found for service 'cache-proxy'\"}",
+      "_step": 10
+    },
+    {
+      "role": "assistant",
+      "_step": 11,
+      "tool_calls": [
+        {
+          "id": "toolu_01CS2sRknD3ZfDNuMewUdNth",
+          "type": "function",
+          "function": {
+            "name": "check_metric",
+            "arguments": "{\"service\": \"consensus-service\", \"metric\": \"error_rate\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_01CS2sRknD3ZfDNuMewUdNth",
+      "content": "{\"metric\": \"error_rate\", \"service\": \"consensus-service\", \"metric_series\": [{\"timestamp\": \"2026-03-16T05:09:00Z\", \"value\": 0.4761}, {\"timestamp\": \"2026-03-16T05:09:30Z\", \"value\": 0.4827}, {\"timestamp\": \"2026-03-16T05:10:00Z\", \"value\": 0.4671}, {\"timestamp\": \"2026-03-16T05:10:30Z\", \"value\": 0.4837}, {\"timestamp\": \"2026-03-16T05:11:00Z\", \"value\": 0.4854}, {\"timestamp\": \"2026-03-16T05:11:30Z\", \"value\": 0.485}, {\"timestamp\": \"2026-03-16T05:12:00Z\", \"value\": 0.481}, {\"timestamp\": \"2026-03-16T05:12:30Z\", \"value\": 0.4787}, {\"timestamp\": \"2026-03-16T05:13:00Z\", \"value\": 0.4655}, {\"timestamp\": \"2026-03-16T05:13:30Z\", \"value\": 0.4815}, {\"timestamp\": \"2026-03-16T05:14:00Z\", \"value\": 0.4688}, {\"timestamp\": \"2026-03-16T05:14:30Z\", \"value\": 0.4792}, {\"timestamp\": \"2026-03-16T05:15:00Z\", \"value\": 0.4874}, {\"timestamp\": \"2026-03-16T05:15:30Z\", \"value\": 0.4806}, {\"timestamp\": \"2026-03-16T05:16:00Z\", \"value\": 0.4791}, {\"timestamp\": \"2026-03-16T05:16:30Z\", \"value\": 0.4901}, {\"timestamp\": \"2026-03-16T05:17:00Z\", \"value\": 0.4776}, {\"timestamp\": \"2026-03-16T05:17:30Z\", \"value\": 0.4854}, {\"timestamp\": \"2026-03-16T05:18:00Z\", \"value\": 0.4791}, {\"timestamp\": \"2026-03-16T05:18:30Z\", \"value\": 0.4702}, {\"timestamp\": \"2026-03-16T05:19:00Z\", \"value\": 0.4726}], \"points\": 21}",
+      "_step": 11
+    },
+    {
+      "role": "assistant",
+      "_step": 12,
+      "tool_calls": [
+        {
+          "id": "toolu_014AtXLyDqJEBTn1e2bAtUV2",
+          "type": "function",
+          "function": {
+            "name": "check_metric",
+            "arguments": "{\"service\": \"tsc-firmware\", \"metric\": \"error_rate\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_014AtXLyDqJEBTn1e2bAtUV2",
+      "content": "{\"metric_series\": [], \"message\": \"Metric 'error_rate' not found for 'tsc-firmware'\", \"available_metrics\": [\"cpu_percent\", \"memory_mb\", \"tsc_offset_ns\"]}",
+      "_step": 12
+    },
+    {
+      "role": "assistant",
+      "_step": 13,
+      "tool_calls": [
+        {
+          "id": "toolu_01SzdqzSUkTwEqudpE8j6jUv",
+          "type": "function",
+          "function": {
+            "name": "check_metric",
+            "arguments": "{\"service\": \"state-store\", \"metric\": \"error_rate\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_01SzdqzSUkTwEqudpE8j6jUv",
+      "content": "{\"metric_series\": [], \"message\": \"Metric 'error_rate' not found for 'state-store'\", \"available_metrics\": [\"write_conflicts_per_min\", \"fsync_latency_p99_ms\"]}",
+      "_step": 13
+    },
+    {
+      "role": "assistant",
+      "_step": 14,
+      "tool_calls": [
+        {
+          "id": "toolu_01VFaKDbP5yRdP4Ee1rb3ptf",
+          "type": "function",
+          "function": {
+            "name": "get_service_info",
+            "arguments": "{\"service\": \"consensus-service\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_01VFaKDbP5yRdP4Ee1rb3ptf",
+      "content": "{\"service\": \"consensus-service\", \"description\": \"Raft-based distributed consensus cluster (3 nodes). Manages leader election, log replication, and lease management. Lease timeout depends on accurate wall clock.\", \"available_actions\": [\"force_leader_election\", \"step_down_leader\", \"update_config\", \"enable_election_tracing\", \"show_cluster_status\", \"reset_term_counter\", \"adjust_lease_timeout\", \"export_raft_metrics\", \"restart_followers\", \"compact_raft_log\", \"show_time_skew_report\"], \"configurable_params\": [\"election_timeout_ms\", \"heartbeat_interval_ms\", \"lease_ttl_ms\", \"snapshot_interval\", \"max_raft_log_entries\", \"clock_source\", \"time_skew_tolerance_ms\"], \"recent_deploys\": [], \"health_checks\": [\"raft_leader_stable\", \"cluster_quorum\", \"term_advance_rate\", \"lease_health\", \"time_sync_status\"]}",
+      "_step": 14
+    },
+    {
+      "role": "assistant",
+      "_step": 15,
+      "tool_calls": [
+        {
+          "id": "toolu_01AQ7JZmCTQj2V72uubtg94w",
+          "type": "function",
+          "function": {
+            "name": "get_service_info",
+            "arguments": "{\"service\": \"tsc-firmware\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_01AQ7JZmCTQj2V72uubtg94w",
+      "content": "{\"service\": \"tsc-firmware\", \"description\": \"CPU microcode management agent. Applies firmware and microcode updates to host CPUs. Controls TSC (Time Stamp Counter) calibration used by time.Now() syscalls.\", \"available_actions\": [\"rollback_microcode\", \"show_microcode_version\", \"recalibrate_tsc\", \"update_config\", \"show_tsc_frequency\", \"validate_clock_source\", \"export_firmware_log\", \"compare_tsc_drift\", \"switch_clock_source\", \"show_microcode_history\", \"trigger_ntp_sync\"], \"configurable_params\": [\"microcode_version\", \"tsc_calibration_method\", \"clock_source\", \"ntp_server\", \"drift_tolerance_ppm\", \"auto_update_enabled\"], \"recent_deploys\": [\"microcode update v2.8 (25 min ago) \\u2014 applied to all consensus-service hosts\"], \"health_checks\": [\"microcode_version_consistent\", \"tsc_drift_ppm\", \"clock_source_active\", \"ntp_sync_status\"]}",
+      "_step": 15
+    },
+    {
+      "role": "assistant",
+      "_step": 16,
+      "tool_calls": [
+        {
+          "id": "toolu_019YDsFMvYL59uQvCEmKF8Yd",
+          "type": "function",
+          "function": {
+            "name": "check_metric",
+            "arguments": "{\"service\": \"tsc-firmware\", \"metric\": \"tsc_offset_ns\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_019YDsFMvYL59uQvCEmKF8Yd",
+      "content": "{\"metric\": \"tsc_offset_ns\", \"service\": \"tsc-firmware\", \"metric_series\": [{\"timestamp\": \"2026-03-16T05:09:00Z\", \"value\": 456315.4153}, {\"timestamp\": \"2026-03-16T05:09:30Z\", \"value\": 453140.4743}, {\"timestamp\": \"2026-03-16T05:10:00Z\", \"value\": 497773.1691}, {\"timestamp\": \"2026-03-16T05:10:30Z\", \"value\": 490657.1512}, {\"timestamp\": \"2026-03-16T05:11:00Z\", \"value\": 520341.2615}, {\"timestamp\": \"2026-03-16T05:11:30Z\", \"value\": 568444.4804}, {\"timestamp\": \"2026-03-16T05:12:00Z\", \"value\": 616017.8996}, {\"timestamp\": \"2026-03-16T05:12:30Z\", \"value\": 603674.3629}, {\"timestamp\": \"2026-03-16T05:13:00Z\", \"value\": 599901.5683}, {\"timestamp\": \"2026-03-16T05:13:30Z\", \"value\": 612828.58}, {\"timestamp\": \"2026-03-16T05:14:00Z\", \"value\": 619424.9252}, {\"timestamp\": \"2026-03-16T05:14:30Z\", \"value\": 648679.6918}, {\"timestamp\": \"2026-03-16T05:15:00Z\", \"value\": 592584.3347}, {\"timestamp\": \"2026-03-16T05:15:30Z\", \"value\": 687090.1339}, {\"timestamp\": \"2026-03-16T05:16:00Z\", \"value\": 699224.5773}, {\"timestamp\": \"2026-03-16T05:16:30Z\", \"value\": 685752.5414}, {\"timestamp\": \"2026-03-16T05:17:00Z\", \"value\": 725934.6277}, {\"timestamp\": \"2026-03-16T05:17:30Z\", \"value\": 812817.6933}, {\"timestamp\": \"2026-03-16T05:18:00Z\", \"value\": 737479.9476}, {\"timestamp\": \"2026-03-16T05:18:30Z\", \"value\": 788721.6629}, {\"timestamp\": \"2026-03-16T05:19:00Z\", \"value\": 847995.2761}], \"points\": 21}",
+      "_step": 16
+    },
+    {
+      "role": "assistant",
+      "_step": 17,
+      "tool_calls": [
+        {
+          "id": "toolu_01E8BE11ouB6YF2moxrAevP9",
+          "type": "function",
+          "function": {
+            "name": "check_metric",
+            "arguments": "{\"service\": \"consensus-service\", \"metric\": \"term_advance_rate\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_01E8BE11ouB6YF2moxrAevP9",
+      "content": "{\"metric_series\": [], \"message\": \"Metric 'term_advance_rate' not found for 'consensus-service'\", \"available_metrics\": [\"leader_elections_per_min\", \"term_number\", \"error_rate\"]}",
+      "_step": 17
+    },
+    {
+      "role": "assistant",
+      "_step": 18,
+      "tool_calls": [
+        {
+          "id": "toolu_01MvRFqskiaAgfvDkpzKq6og",
+          "type": "function",
+          "function": {
+            "name": "execute_runbook",
+            "arguments": "{\"service\": \"consensus-service\", \"action\": \"show_time_skew_report\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_01MvRFqskiaAgfvDkpzKq6og",
+      "content": "{\"action\": \"execute_runbook\", \"target\": \"consensus-service\", \"outcome\": \"no_effect\", \"system_health\": \"broken\", \"message\": \"TSC clock drift active. Cluster timestamps diverging. Leader elections unstable.\"}",
+      "_step": 18
+    },
+    {
+      "role": "assistant",
+      "_step": 19,
+      "tool_calls": [
+        {
+          "id": "toolu_01EtuZKAsvdytGWYXUub6M79",
+          "type": "function",
+          "function": {
+            "name": "execute_runbook",
+            "arguments": "{\"service\": \"tsc-firmware\", \"action\": \"compare_tsc_drift\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_01EtuZKAsvdytGWYXUub6M79",
+      "content": "{\"action\": \"execute_runbook\", \"target\": \"tsc-firmware\", \"outcome\": \"no_effect\", \"system_health\": \"broken\", \"message\": \"TSC clock drift active. Cluster timestamps diverging. Leader elections unstable.\"}",
+      "_step": 19
+    },
+    {
+      "role": "assistant",
+      "_step": 20,
+      "tool_calls": [
+        {
+          "id": "toolu_018ZtKzphocAjyvquNvUhHZt",
+          "type": "function",
+          "function": {
+            "name": "check_metric",
+            "arguments": "{\"service\": \"consensus-service\", \"metric\": \"leader_elections_per_min\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_018ZtKzphocAjyvquNvUhHZt",
+      "content": "{\"metric\": \"leader_elections_per_min\", \"service\": \"consensus-service\", \"metric_series\": [{\"timestamp\": \"2026-03-16T05:09:00Z\", \"value\": 8.2592}, {\"timestamp\": \"2026-03-16T05:09:30Z\", \"value\": 7.8867}, {\"timestamp\": \"2026-03-16T05:10:00Z\", \"value\": 8.0581}, {\"timestamp\": \"2026-03-16T05:10:30Z\", \"value\": 7.9281}, {\"timestamp\": \"2026-03-16T05:11:00Z\", \"value\": 7.7673}, {\"timestamp\": \"2026-03-16T05:11:30Z\", \"value\": 7.7203}, {\"timestamp\": \"2026-03-16T05:12:00Z\", \"value\": 8.1569}, {\"timestamp\": \"2026-03-16T05:12:30Z\", \"value\": 8.0569}, {\"timestamp\": \"2026-03-16T05:13:00Z\", \"value\": 8.1918}, {\"timestamp\": \"2026-03-16T05:13:30Z\", \"value\": 8.1708}, {\"timestamp\": \"2026-03-16T05:14:00Z\", \"value\": 8.0505}, {\"timestamp\": \"2026-03-16T05:14:30Z\", \"value\": 8.5143}, {\"timestamp\": \"2026-03-16T05:15:00Z\", \"value\": 8.0853}, {\"timestamp\": \"2026-03-16T05:15:30Z\", \"value\": 8.0192}, {\"timestamp\": \"2026-03-16T05:16:00Z\", \"value\": 8.0062}, {\"timestamp\": \"2026-03-16T05:16:30Z\", \"value\": 7.7019}, {\"timestamp\": \"2026-03-16T05:17:00Z\", \"value\": 7.8687}, {\"timestamp\": \"2026-03-16T05:17:30Z\", \"value\": 7.7007}, {\"timestamp\": \"2026-03-16T05:18:00Z\", \"value\": 8.1142}, {\"timestamp\": \"2026-03-16T05:18:30Z\", \"value\": 8.0426}, {\"timestamp\": \"2026-03-16T05:19:00Z\", \"value\": 7.9646}], \"points\": 21}",
+      "_step": 20
+    },
+    {
+      "role": "assistant",
+      "_step": 21,
+      "tool_calls": [
+        {
+          "id": "toolu_0113TRaz9hWsodW39PkGKrSY",
+          "type": "function",
+          "function": {
+            "name": "check_metric",
+            "arguments": "{\"service\": \"consensus-service\", \"metric\": \"term_number\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_0113TRaz9hWsodW39PkGKrSY",
+      "content": "{\"metric\": \"term_number\", \"service\": \"consensus-service\", \"metric_series\": [{\"timestamp\": \"2026-03-16T05:09:00Z\", \"value\": 172.5}, {\"timestamp\": \"2026-03-16T05:09:30Z\", \"value\": 173.875}, {\"timestamp\": \"2026-03-16T05:10:00Z\", \"value\": 175.25}, {\"timestamp\": \"2026-03-16T05:10:30Z\", \"value\": 176.625}, {\"timestamp\": \"2026-03-16T05:11:00Z\", \"value\": 178.0}, {\"timestamp\": \"2026-03-16T05:11:30Z\", \"value\": 179.375}, {\"timestamp\": \"2026-03-16T05:12:00Z\", \"value\": 180.75}, {\"timestamp\": \"2026-03-16T05:12:30Z\", \"value\": 182.125}, {\"timestamp\": \"2026-03-16T05:13:00Z\", \"value\": 183.5}, {\"timestamp\": \"2026-03-16T05:13:30Z\", \"value\": 184.875}, {\"timestamp\": \"2026-03-16T05:14:00Z\", \"value\": 186.25}, {\"timestamp\": \"2026-03-16T05:14:30Z\", \"value\": 187.625}, {\"timestamp\": \"2026-03-16T05:15:00Z\", \"value\": 189.0}, {\"timestamp\": \"2026-03-16T05:15:30Z\", \"value\": 190.375}, {\"timestamp\": \"2026-03-16T05:16:00Z\", \"value\": 191.75}, {\"timestamp\": \"2026-03-16T05:16:30Z\", \"value\": 193.125}, {\"timestamp\": \"2026-03-16T05:17:00Z\", \"value\": 194.5}, {\"timestamp\": \"2026-03-16T05:17:30Z\", \"value\": 195.875}, {\"timestamp\": \"2026-03-16T05:18:00Z\", \"value\": 197.25}, {\"timestamp\": \"2026-03-16T05:18:30Z\", \"value\": 198.625}, {\"timestamp\": \"2026-03-16T05:19:00Z\", \"value\": 200.0}], \"points\": 21}",
+      "_step": 21
+    },
+    {
+      "role": "assistant",
+      "_step": 22,
+      "tool_calls": [
+        {
+          "id": "toolu_01GvrTNAPcckMaCx5Z6f88Hg",
+          "type": "function",
+          "function": {
+            "name": "execute_runbook",
+            "arguments": "{\"service\": \"tsc-firmware\", \"action\": \"show_microcode_history\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_01GvrTNAPcckMaCx5Z6f88Hg",
+      "content": "{\"action\": \"execute_runbook\", \"target\": \"tsc-firmware\", \"outcome\": \"no_effect\", \"system_health\": \"broken\", \"message\": \"TSC clock drift active. Cluster timestamps diverging. Leader elections unstable.\"}",
+      "_step": 22
+    },
+    {
+      "role": "assistant",
+      "_step": 23,
+      "tool_calls": [
+        {
+          "id": "toolu_01DtKyQFy6tYvUc7RQXbx6AZ",
+          "type": "function",
+          "function": {
+            "name": "execute_runbook",
+            "arguments": "{\"service\": \"tsc-firmware\", \"action\": \"rollback_microcode\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_01DtKyQFy6tYvUc7RQXbx6AZ",
+      "content": "{\"action\": \"execute_runbook\", \"target\": \"tsc-firmware\", \"outcome\": \"progress\", \"system_health\": \"microcode_reverted\", \"message\": \"CPU microcode rolled back to v2.7 on affected hosts. TSC frequency recalibrating. Clock drift stopping. But cluster processes still using cached drifted timestamps \\u2014 stale time references in memory.\"}",
+      "_step": 23
+    },
+    {
+      "role": "assistant",
+      "_step": 24,
+      "tool_calls": [
+        {
+          "id": "toolu_01ScJezRaYdog2QXUHLMRuwM",
+          "type": "function",
+          "function": {
+            "name": "execute_runbook",
+            "arguments": "{\"service\": \"tsc-firmware\", \"action\": \"recalibrate_tsc\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_01ScJezRaYdog2QXUHLMRuwM",
+      "content": "{\"action\": \"execute_runbook\", \"target\": \"tsc-firmware\", \"outcome\": \"no_effect\", \"system_health\": \"microcode_reverted\", \"message\": \"Microcode reverted. Clock source corrected. Cluster processes still using cached drifted timestamps.\"}",
+      "_step": 24
+    },
+    {
+      "role": "assistant",
+      "_step": 25,
+      "tool_calls": [
+        {
+          "id": "toolu_01TV1roGGb6t8ZLYWR3jdWVD",
+          "type": "function",
+          "function": {
+            "name": "execute_runbook",
+            "arguments": "{\"service\": \"tsc-firmware\", \"action\": \"trigger_ntp_sync\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_01TV1roGGb6t8ZLYWR3jdWVD",
+      "content": "{\"action\": \"execute_runbook\", \"target\": \"tsc-firmware\", \"outcome\": \"no_effect\", \"system_health\": \"microcode_reverted\", \"message\": \"Microcode reverted. Clock source corrected. Cluster processes still using cached drifted timestamps.\"}",
+      "_step": 25
+    },
+    {
+      "role": "assistant",
+      "_step": 26,
+      "tool_calls": [
+        {
+          "id": "toolu_017SWcxCt6wnXfuDBKhziKRS",
+          "type": "function",
+          "function": {
+            "name": "execute_runbook",
+            "arguments": "{\"service\": \"consensus-service\", \"action\": \"show_cluster_status\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_017SWcxCt6wnXfuDBKhziKRS",
+      "content": "{\"action\": \"execute_runbook\", \"target\": \"consensus-service\", \"outcome\": \"no_effect\", \"system_health\": \"microcode_reverted\", \"message\": \"Microcode reverted. Clock source corrected. Cluster processes still using cached drifted timestamps.\"}",
+      "_step": 26
+    },
+    {
+      "role": "assistant",
+      "_step": 27,
+      "tool_calls": [
+        {
+          "id": "toolu_01Qbj5f1NdWAzLTC5rQLJ4P8",
+          "type": "function",
+          "function": {
+            "name": "restart_service",
+            "arguments": "{\"service\": \"consensus-service\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_01Qbj5f1NdWAzLTC5rQLJ4P8",
+      "content": "{\"action\": \"restart_service\", \"target\": \"consensus-service\", \"outcome\": \"progress\", \"system_health\": \"consensus_restarted\", \"message\": \"Process restarted with corrected clock source. Fresh timestamps. But leader election still pending \\u2014 quorum not yet stable.\"}",
+      "_step": 27
+    },
+    {
+      "role": "assistant",
+      "_step": 28,
+      "tool_calls": [
+        {
+          "id": "toolu_01NVnwwgyCeemUD2Xw79b9RB",
+          "type": "function",
+          "function": {
+            "name": "execute_runbook",
+            "arguments": "{\"service\": \"consensus-service\", \"action\": \"force_leader_election\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_01NVnwwgyCeemUD2Xw79b9RB",
+      "content": "{\"action\": \"execute_runbook\", \"target\": \"consensus-service\", \"outcome\": \"progress\", \"system_health\": \"leader_stable\", \"message\": \"Leader election completed. New leader elected. Term advanced. Lease holding stable. Cluster accepting operations.\"}",
+      "_step": 28
+    },
+    {
+      "role": "assistant",
+      "_step": 29,
+      "tool_calls": [
+        {
+          "id": "toolu_01A9yp1dXykVVQofNPNTR9xp",
+          "type": "function",
+          "function": {
+            "name": "check_metric",
+            "arguments": "{\"service\": \"consensus-service\", \"metric\": \"leader_elections_per_min\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_01A9yp1dXykVVQofNPNTR9xp",
+      "content": "{\"metric\": \"leader_elections_per_min\", \"service\": \"consensus-service\", \"metric_series\": [{\"timestamp\": \"2026-03-16T05:09:00Z\", \"value\": 8.2592}, {\"timestamp\": \"2026-03-16T05:09:30Z\", \"value\": 7.8867}, {\"timestamp\": \"2026-03-16T05:10:00Z\", \"value\": 8.0581}, {\"timestamp\": \"2026-03-16T05:10:30Z\", \"value\": 7.9281}, {\"timestamp\": \"2026-03-16T05:11:00Z\", \"value\": 7.7673}, {\"timestamp\": \"2026-03-16T05:11:30Z\", \"value\": 7.7203}, {\"timestamp\": \"2026-03-16T05:12:00Z\", \"value\": 8.1569}, {\"timestamp\": \"2026-03-16T05:12:30Z\", \"value\": 8.0569}, {\"timestamp\": \"2026-03-16T05:13:00Z\", \"value\": 8.1918}, {\"timestamp\": \"2026-03-16T05:13:30Z\", \"value\": 8.1708}, {\"timestamp\": \"2026-03-16T05:14:00Z\", \"value\": 8.0505}, {\"timestamp\": \"2026-03-16T05:14:30Z\", \"value\": 8.5143}, {\"timestamp\": \"2026-03-16T05:15:00Z\", \"value\": 8.0853}, {\"timestamp\": \"2026-03-16T05:15:30Z\", \"value\": 8.0192}, {\"timestamp\": \"2026-03-16T05:16:00Z\", \"value\": 8.0062}, {\"timestamp\": \"2026-03-16T05:16:30Z\", \"value\": 7.7019}, {\"timestamp\": \"2026-03-16T05:17:00Z\", \"value\": 7.8687}, {\"timestamp\": \"2026-03-16T05:17:30Z\", \"value\": 7.7007}, {\"timestamp\": \"2026-03-16T05:18:00Z\", \"value\": 8.1142}, {\"timestamp\": \"2026-03-16T05:18:30Z\", \"value\": 8.0426}, {\"timestamp\": \"2026-03-16T05:19:00Z\", \"value\": 7.9646}], \"points\": 21}",
+      "_step": 29
+    },
+    {
+      "role": "assistant",
+      "_step": 30,
+      "tool_calls": [
+        {
+          "id": "toolu_01R4NbJMyWmFyoaUPjeEY7wu",
+          "type": "function",
+          "function": {
+            "name": "check_metric",
+            "arguments": "{\"service\": \"consensus-service\", \"metric\": \"error_rate\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_01R4NbJMyWmFyoaUPjeEY7wu",
+      "content": "{\"metric\": \"error_rate\", \"service\": \"consensus-service\", \"metric_series\": [{\"timestamp\": \"2026-03-16T05:09:00Z\", \"value\": 0.4761}, {\"timestamp\": \"2026-03-16T05:09:30Z\", \"value\": 0.4827}, {\"timestamp\": \"2026-03-16T05:10:00Z\", \"value\": 0.4671}, {\"timestamp\": \"2026-03-16T05:10:30Z\", \"value\": 0.4837}, {\"timestamp\": \"2026-03-16T05:11:00Z\", \"value\": 0.4854}, {\"timestamp\": \"2026-03-16T05:11:30Z\", \"value\": 0.485}, {\"timestamp\": \"2026-03-16T05:12:00Z\", \"value\": 0.481}, {\"timestamp\": \"2026-03-16T05:12:30Z\", \"value\": 0.4787}, {\"timestamp\": \"2026-03-16T05:13:00Z\", \"value\": 0.4655}, {\"timestamp\": \"2026-03-16T05:13:30Z\", \"value\": 0.4815}, {\"timestamp\": \"2026-03-16T05:14:00Z\", \"value\": 0.4688}, {\"timestamp\": \"2026-03-16T05:14:30Z\", \"value\": 0.4792}, {\"timestamp\": \"2026-03-16T05:15:00Z\", \"value\": 0.4874}, {\"timestamp\": \"2026-03-16T05:15:30Z\", \"value\": 0.4806}, {\"timestamp\": \"2026-03-16T05:16:00Z\", \"value\": 0.4791}, {\"timestamp\": \"2026-03-16T05:16:30Z\", \"value\": 0.4901}, {\"timestamp\": \"2026-03-16T05:17:00Z\", \"value\": 0.4776}, {\"timestamp\": \"2026-03-16T05:17:30Z\", \"value\": 0.4854}, {\"timestamp\": \"2026-03-16T05:18:00Z\", \"value\": 0.4791}, {\"timestamp\": \"2026-03-16T05:18:30Z\", \"value\": 0.4702}, {\"timestamp\": \"2026-03-16T05:19:00Z\", \"value\": 0.4726}], \"points\": 21}",
+      "_step": 30
+    },
+    {
+      "role": "assistant",
+      "_step": 31,
+      "tool_calls": [
+        {
+          "id": "toolu_01KNVbjyn3DAmEMTnX8pjn2S",
+          "type": "function",
+          "function": {
+            "name": "check_metric",
+            "arguments": "{\"service\": \"tsc-firmware\", \"metric\": \"tsc_offset_ns\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_01KNVbjyn3DAmEMTnX8pjn2S",
+      "content": "{\"metric\": \"tsc_offset_ns\", \"service\": \"tsc-firmware\", \"metric_series\": [{\"timestamp\": \"2026-03-16T05:09:00Z\", \"value\": 456315.4153}, {\"timestamp\": \"2026-03-16T05:09:30Z\", \"value\": 453140.4743}, {\"timestamp\": \"2026-03-16T05:10:00Z\", \"value\": 497773.1691}, {\"timestamp\": \"2026-03-16T05:10:30Z\", \"value\": 490657.1512}, {\"timestamp\": \"2026-03-16T05:11:00Z\", \"value\": 520341.2615}, {\"timestamp\": \"2026-03-16T05:11:30Z\", \"value\": 568444.4804}, {\"timestamp\": \"2026-03-16T05:12:00Z\", \"value\": 616017.8996}, {\"timestamp\": \"2026-03-16T05:12:30Z\", \"value\": 603674.3629}, {\"timestamp\": \"2026-03-16T05:13:00Z\", \"value\": 599901.5683}, {\"timestamp\": \"2026-03-16T05:13:30Z\", \"value\": 612828.58}, {\"timestamp\": \"2026-03-16T05:14:00Z\", \"value\": 619424.9252}, {\"timestamp\": \"2026-03-16T05:14:30Z\", \"value\": 648679.6918}, {\"timestamp\": \"2026-03-16T05:15:00Z\", \"value\": 592584.3347}, {\"timestamp\": \"2026-03-16T05:15:30Z\", \"value\": 687090.1339}, {\"timestamp\": \"2026-03-16T05:16:00Z\", \"value\": 699224.5773}, {\"timestamp\": \"2026-03-16T05:16:30Z\", \"value\": 685752.5414}, {\"timestamp\": \"2026-03-16T05:17:00Z\", \"value\": 725934.6277}, {\"timestamp\": \"2026-03-16T05:17:30Z\", \"value\": 812817.6933}, {\"timestamp\": \"2026-03-16T05:18:00Z\", \"value\": 737479.9476}, {\"timestamp\": \"2026-03-16T05:18:30Z\", \"value\": 788721.6629}, {\"timestamp\": \"2026-03-16T05:19:00Z\", \"value\": 847995.2761}], \"points\": 21}",
+      "_step": 31
+    },
+    {
+      "role": "assistant",
+      "_step": 32,
+      "tool_calls": [
+        {
+          "id": "toolu_01Q2xbo4WnyYy3wLMabw9Kxj",
+          "type": "function",
+          "function": {
+            "name": "verify_resolution",
+            "arguments": "{\"affected_service\": \"tsc-firmware\", \"failure_type\": \"clock_drift\", \"root_cause\": \"tsc-firmware microcode update v2.8 (deployed 25 min ago) introduced TSC (Time Stamp Counter) calibration errors on all consensus-service hosts, causing wall clock timestamps to diverge across nodes by up to 848\\u00b5s and growing. The Raft consensus-service relies on accurate wall clock for lease timeouts and heartbeat intervals; the clock skew caused heartbeats to appear expired, triggering continuous leader elections (~8/min) and rapid term advancement (172\\u2192200+ terms in 10 minutes), resulting in ~48% error rate and total consensus failure. Fixed by: rolling back tsc-firmware microcode to v2.7, restarting consensus-service to flush stale cached timestamps, and forcing a clean leader election to stabilize the cluster.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_01Q2xbo4WnyYy3wLMabw9Kxj",
+      "content": "{\"result\": \"resolution_verified\", \"system_state\": \"leader_stable\", \"system_healthy\": false, \"reward\": 0.2792, \"done\": true, \"message\": \"[NOT SOLVED] System state: leader_stable. Reward: 0.2792\"}",
+      "_step": 32
+    }
+  ]
+}
