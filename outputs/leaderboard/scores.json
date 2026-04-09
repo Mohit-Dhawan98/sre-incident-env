@@ -92,5 +92,38 @@
       0.0001,
       0.0001
     ]
+  },
+  "claude-sonnet-4-6": {
+    "jvm_metaspace_classloader_leak_001": [
+      0.2614,
+      0.275
+    ],
+    "etcd_compaction_quota_alarm_001": [
+      0.29,
+      0.29
+    ],
+    "kafka_partition_rebalance_storm_001": [
+      0.2616,
+      0.2937
+    ],
+    "cpu_microcode_tsc_drift_001": [
+      0.8617,
+      0.2792
+    ],
+    "cert_expiry_mutual_tls_001": [
+      0.2625,
+      0.2641
+    ],
+    "numa_cross_socket_latency_001": [
+      0.8813,
+      0.87
+    ],
+    "kernel_tcp_rmem_silent_drop_001": [
+      0.1893,
+      0.2145
+    ],
+    "wal_archive_disk_full_h002": [
+      0.814
+    ]
   }
 }

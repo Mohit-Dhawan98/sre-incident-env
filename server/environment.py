@@ -471,7 +471,7 @@ class SREIncidentEnvironment(MCPEnvironment):
         scenario_id = kwargs.get("scenario_id", None)
 
         self._scenario = self.loader.sample(
-            difficulty=difficulty, scenario_id=scenario_id
+            difficulty=difficulty, scenario_id=scenario_id, seed=seed
         )
         self._difficulty = difficulty
         self._query_budget = self._budget_for_difficulty(difficulty)

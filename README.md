@@ -218,6 +218,20 @@ Final reward clamped strictly to `(0.0001, 0.9999)` for Hackathon Phase 2 valida
 - **No double counting** — each component measures a different dimension. Extra steps lower Efficiency. Harmful steps lower Trap Avoidance. Repeated steps lower Diversity.
 - **Terminal reward, per-step observation feedback** — reward is computed at episode end via `verify_resolution`. During the episode the agent reads logs/metrics/system state as navigation signal.
 
+## Anti-memorization via parameter randomization
+
+Each scenario supports seeded parameter randomization on `reset(seed=N)`. Surface features (service names, config values, version strings) are sampled from pools per reset, while the structural remediation pattern (state-graph topology, optimal path, trap placement) remains invariant.
+
+**What randomizes:** free service names (3–8 per scenario), numeric thresholds (timeout values, retention hours), version strings, timestamp references.
+
+**What stays fixed:** domain-locked service names (zookeeper, postgres, etcd, etc.), state graph topology, optimal step count, trap actions, reward function.
+
+**Variant counts:** 64 to 65,536 unique instances per scenario depending on pool sizes. Across seeds 1..1000, every episode is a unique instance.
+
+**Why it matters for RL:** without randomization, an agent can memorize "for kafka, always call `update_config(zookeeper, session_timeout_ms, 30000)`" without investigating. With randomization, the coordinator may be named differently and the correct timeout value may be 40000 or 60000 — the agent must investigate to discover the right values each time.
+
+**Backward compatibility:** `seed=0` (or `seed=None`) returns the original canonical scenario, preserving all existing leaderboard scores and trace data.
+
 ## Scenarios (8)
 
 ### Easy (2 scenarios)
