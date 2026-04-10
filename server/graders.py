@@ -81,7 +81,7 @@ def grade_easy(response: str = "", scenario: Optional[Dict] = None, **kwargs) ->
 
     # Single-response mode — keyword-based grading
     if not scenario:
-        return 0.001
+        return 0.01
 
     return _grade_response(response, scenario, difficulty="easy")
 
@@ -91,7 +91,7 @@ def grade_medium(response: str = "", scenario: Optional[Dict] = None, **kwargs) 
     if kwargs.get("system_healthy") is not None:
         return _grade_episode(**kwargs)
     if not scenario:
-        return 0.001
+        return 0.01
     return _grade_response(response, scenario, difficulty="medium")
 
 
@@ -100,7 +100,7 @@ def grade_hard(response: str = "", scenario: Optional[Dict] = None, **kwargs) ->
     if kwargs.get("system_healthy") is not None:
         return _grade_episode(**kwargs)
     if not scenario:
-        return 0.001
+        return 0.01
     return _grade_response(response, scenario, difficulty="hard")
 
 
@@ -121,7 +121,7 @@ def _grade_response(response: str, scenario: Dict, difficulty: str) -> float:
     """
     r = response.lower().strip()
     if not r:
-        return 0.001
+        return 0.01
 
     score = 0.0
     failure = scenario.get("failure", {})
@@ -164,4 +164,4 @@ def _grade_response(response: str, scenario: Dict, difficulty: str) -> float:
     if sum(1 for m in structured_markers if m in r) >= 2:
         score += 0.10
 
-    return round(min(0.999, max(0.001, score)), 4)
+    return round(min(0.99, max(0.01, score)), 4)

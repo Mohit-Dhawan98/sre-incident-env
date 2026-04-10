@@ -289,7 +289,7 @@ async def run_episode(
                 print(f"    API error: {str(e)[:100]}")
             rewards_str = ",".join(f"{r:.2f}" for r in step_rewards) or "0.00"
             print(f"[END] success=false steps={step_count} rewards={rewards_str}", flush=True)
-            return {"reward": 0.001, "error": str(e)[:200], "steps": step_count}
+            return {"reward": 0.01, "error": str(e)[:200], "steps": step_count}
 
         message = response.choices[0].message
 
@@ -406,7 +406,7 @@ async def run_episode(
                 print()
 
         # Hackathon structured output: [STEP]
-        safe_step_reward = max(0.001, min(0.999, reward))
+        safe_step_reward = max(0.01, min(0.99, reward))
         step_rewards.append(safe_step_reward)
         _progress.update({"step_count": step_count, "reward": reward})
         action_str = f"{tool_name}({json.dumps(tool_args)[:60]})" if tool_name else "text"
@@ -414,7 +414,7 @@ async def run_episode(
         print(f"[STEP] step={step_count} action={action_str} reward={safe_step_reward:.2f} done={done_str} error=null", flush=True)
 
         if done:
-            safe_reward = max(0.001, min(0.999, reward))
+            safe_reward = max(0.01, min(0.99, reward))
             success = "true" if safe_reward >= 0.5 else "false"
             rewards_str = ",".join(f"{r:.2f}" for r in step_rewards)
             print(f"[END] success={success} steps={step_count} rewards={rewards_str}", flush=True)
@@ -434,7 +434,7 @@ async def run_episode(
 
     rewards_str = ",".join(f"{r:.2f}" for r in step_rewards) or "0.00"
     print(f"[END] success=false steps={MAX_STEPS} rewards={rewards_str}", flush=True)
-    return {"reward": 0.001, "error": "max_turns", "steps": MAX_STEPS}
+    return {"reward": 0.01, "error": "max_turns", "steps": MAX_STEPS}
 
 
 # ---------------------------------------------------------------------------
@@ -611,8 +611,8 @@ async def async_main() -> None:
                         task_name = sid or f"{difficulty}_episode"
                         if not ep_progress.get("started"):
                             print(f"[START] task={task_name} env=sre_incident_env model={model}", flush=True)
-                        print(f"[END] success=false steps=0 rewards=0.001", flush=True)
-                        result = {"reward": 0.001, "error": f"session_error: {str(e)[:100]}", "steps": 0}
+                        print(f"[END] success=false steps=0 rewards=0.01", flush=True)
+                        result = {"reward": 0.01, "error": f"session_error: {str(e)[:100]}", "steps": 0}
                     result["scenario_id"] = sid
                     result["run"] = run_num
                     tier_results.append(result)
@@ -640,7 +640,7 @@ async def async_main() -> None:
         print(f"[ERROR] Unhandled exception: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
         # Emit minimal valid output so validator sees structured lines
         print(f"[START] task=error env=sre_incident_env model={model}", flush=True)
-        print(f"[END] success=false steps=0 rewards=0.001", flush=True)
+        print(f"[END] success=false steps=0 rewards=0.01", flush=True)
     finally:
         if server_proc:
             server_proc.terminate()
