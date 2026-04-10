@@ -21,15 +21,15 @@ from fastapi import Body, HTTPException
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from openenv.core.env_server import create_app
-from openenv.core.env_server.mcp_types import CallToolAction, CallToolObservation
 from openenv.core.env_server.mcp_environment import get_server_tools
 
+from models import SREAction, SREObservation
 from server.environment import SREIncidentEnvironment
 
 app = create_app(
     SREIncidentEnvironment,
-    CallToolAction,
-    CallToolObservation,
+    SREAction,
+    SREObservation,
     env_name="sre_incident_env",
     max_concurrent_envs=5,
 )

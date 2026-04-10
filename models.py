@@ -1,13 +1,25 @@
 """
 Data models for SRE Incident Response Environment.
 
-MCP pattern: no custom Action class needed — framework provides CallToolAction.
-We define Observation and State for typed environment responses.
+Follows the OpenEnv convention: custom Action/Observation types inheriting
+from openenv base classes. Our types extend the MCP CallToolAction/Observation
+with the same interface (thin wrappers for spec compliance).
 """
 
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
+from openenv.core.env_server.mcp_types import CallToolAction, CallToolObservation
+
+
+class SREAction(CallToolAction):
+    """SRE incident response action — wraps MCP tool call."""
+    pass
+
+
+class SREObservation(CallToolObservation):
+    """SRE incident response observation — wraps MCP tool result."""
+    pass
 
 
 class LogEntry(BaseModel):
@@ -20,23 +32,6 @@ class LogEntry(BaseModel):
 class MetricPoint(BaseModel):
     timestamp: str
     value: float
-
-
-class SREObservation(BaseModel):
-    """Observation returned after each environment interaction."""
-
-    done: bool = False
-    reward: float = 0.0
-    metadata: Dict[str, Any] = Field(default_factory=dict)
-
-    # SRE-specific fields
-    action_type: str = ""
-    logs: Optional[List[LogEntry]] = None
-    metric_series: Optional[List[MetricPoint]] = None
-    services: Optional[List[str]] = None
-    message: str = ""
-    queries_remaining: int = 0
-    episode_elapsed_seconds: float = 0.0
 
 
 class SREState(BaseModel):
