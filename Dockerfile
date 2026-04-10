@@ -1,56 +1,36 @@
-ARG BASE_IMAGE=ghcr.io/meta-pytorch/openenv-base:latest
-FROM ${BASE_IMAGE} AS builder
+FROM python:3.11-slim
 
 WORKDIR /app
 
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends git curl && \
-    rm -rf /var/lib/apt/lists/*
+# System deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl git \
+    && rm -rf /var/lib/apt/lists/*
 
-ARG BUILD_MODE=in-repo
-ARG ENV_NAME=sre_incident_env
-
-COPY . /app/env
-
-WORKDIR /app/env
-
-# Ensure uv is available
-RUN if ! command -v uv >/dev/null 2>&1; then \
-        curl -LsSf https://astral.sh/uv/install.sh | sh && \
-        mv /root/.local/bin/uv /usr/local/bin/uv && \
-        mv /root/.local/bin/uvx /usr/local/bin/uvx; \
-    fi
+# Copy project
+COPY . /app/
 
 # Install dependencies
-RUN --mount=type=cache,target=/root/.cache/uv \
-    if [ -f uv.lock ]; then \
-        uv sync --frozen --no-install-project --no-editable; \
-    else \
-        uv sync --no-install-project --no-editable; \
-    fi
+RUN pip install --no-cache-dir \
+    "openenv-core[core]>=0.2.2" \
+    "pydantic>=2.0.0" \
+    "fastapi>=0.115.0" \
+    "uvicorn>=0.24.0" \
+    "fastmcp>=3.0.0" \
+    "openai>=2.7.2" \
+    "requests>=2.31.0" \
+    "python-dotenv" \
+    "httpx>=0.27.0" \
+    "gradio==6.10.0" \
+    "anthropic>=0.92.0"
 
-RUN --mount=type=cache,target=/root/.cache/uv \
-    if [ -f uv.lock ]; then \
-        uv sync --frozen --no-editable; \
-    else \
-        uv sync --no-editable; \
-    fi
-
-# Final runtime stage
-FROM ${BASE_IMAGE}
-
-WORKDIR /app
-
-COPY --from=builder /app/env/.venv /app/.venv
-COPY --from=builder /app/env /app/env
-
-ENV PATH="/app/.venv/bin:$PATH"
-ENV PYTHONPATH="/app/env:$PYTHONPATH"
 ENV PYTHONUNBUFFERED=1
-ENV ENABLE_WEB_INTERFACE=false
-
-HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-    CMD curl -f http://localhost:7860/health || exit 1
+ENV PYTHONPATH="/app"
 
 EXPOSE 7860
-CMD ["sh", "-c", "cd /app/env && uvicorn server.app:app --host 0.0.0.0 --port 7860"]
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:7860/health || exit 1
+
+ENV ENABLE_WEB_INTERFACE=false
+CMD ["python", "-c", "import uvicorn; uvicorn.run('server.app:app', host='0.0.0.0', port=7860, ws_ping_interval=None, ws_ping_timeout=None)"]
