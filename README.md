@@ -4,7 +4,7 @@ emoji: "\U0001F527"
 colorFrom: red
 colorTo: gray
 sdk: docker
-app_port: 8000
+app_port: 7860
 ---
 
 # SRE Incident Response Environment

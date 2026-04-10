@@ -5,7 +5,7 @@ description: "SRE incident response environment — state-graph maze where agent
 type: space
 runtime: fastapi
 app: server.app:app
-port: 8000
+port: 7860
 tags:
   - openenv
   - sre

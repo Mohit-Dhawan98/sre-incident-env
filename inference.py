@@ -458,8 +458,8 @@ async def async_main() -> None:
         base_url = args.space
         mode = f"remote ({args.space})"
     else:
-        base_url = "http://localhost:8000"
-        mode = "local (http://127.0.0.1:8000)"
+        base_url = "http://localhost:7860"
+        mode = "local (http://127.0.0.1:7860)"
 
     if args.websocket:
         from client import SREIncidentEnv
@@ -476,7 +476,7 @@ async def async_main() -> None:
         import subprocess, time
         server_proc = subprocess.Popen(
             [sys.executable, "-m", "uvicorn", "server.app:app",
-             "--host", "127.0.0.1", "--port", "8000"],
+             "--host", "127.0.0.1", "--port", "7860"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
         time.sleep(3)

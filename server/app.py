@@ -179,7 +179,7 @@ def main() -> None:
     uvicorn.run(
         app,
         host="0.0.0.0",
-        port=8000,
+        port=7860,
         ws_ping_interval=None,
         ws_ping_timeout=None,
     )
