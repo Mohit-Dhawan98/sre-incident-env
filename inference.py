@@ -42,7 +42,7 @@ from openai import OpenAI
 API_BASE_URL = os.getenv("API_BASE_URL") or "https://router.huggingface.co/v1"
 API_KEY = os.getenv("HF_TOKEN") or os.getenv("OPENAI_API_KEY") or os.getenv("API_KEY")
 MODEL = os.getenv("MODEL_NAME") or "Qwen/Qwen2.5-72B-Instruct"
-MAX_STEPS = 200
+MAX_STEPS = 100
 CONTEXT_CHAR_LIMIT = 120000
 VERBOSE = True
 
@@ -483,7 +483,8 @@ async def async_main() -> None:
 
     difficulties = [args.difficulty] if args.difficulty else ["easy", "medium", "hard"]
 
-    BASELINE_SCENARIOS = {
+    import random
+    _ALL_SCENARIOS = {
         "easy": [
             "jvm_metaspace_classloader_leak_001",
             "etcd_compaction_quota_alarm_001",
@@ -498,6 +499,10 @@ async def async_main() -> None:
             "kernel_tcp_rmem_silent_drop_001",
             "wal_archive_disk_full_h002",
         ],
+    }
+    # Pick 1 random scenario per tier to stay within 30min validator budget
+    BASELINE_SCENARIOS = {
+        tier: [random.choice(ids)] for tier, ids in _ALL_SCENARIOS.items()
     }
 
     try:
@@ -556,8 +561,11 @@ async def async_main() -> None:
                     print(f"\n  Episode {idx}/{total} ({sid} run{run_num}):")
                     try:
                         async with make_env() as ep_env:
-                            result = await run_episode(
-                                ep_env, llm_client, model, tools, difficulty, scenario_id=sid,
+                            result = await asyncio.wait_for(
+                                run_episode(
+                                    ep_env, llm_client, model, tools, difficulty, scenario_id=sid,
+                                ),
+                                timeout=480,  # 8 min per episode — 3 episodes fit in 30min budget
                             )
                     except Exception as e:
                         if VERBOSE:
