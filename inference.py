@@ -502,10 +502,25 @@ async def async_main() -> None:
 
     try:
         # Discover tools using a one-shot session (separate from episodes)
-        async with env as discover_env:
-            reset_result = await discover_env.reset(difficulty="easy")
-            tools_raw = await discover_env.list_tools()
-            tools = mcp_tools_to_openai(tools_raw)
+        # Retry connection — HF Spaces may need time to wake up / rebuild
+        tools = None
+        for _attempt in range(5):
+            try:
+                async with env as discover_env:
+                    reset_result = await discover_env.reset(difficulty="easy")
+                    tools_raw = await discover_env.list_tools()
+                    tools = mcp_tools_to_openai(tools_raw)
+                break
+            except Exception as _conn_err:
+                if _attempt < 4:
+                    wait = 10 * (_attempt + 1)
+                    print(f"  [RETRY] Connection attempt {_attempt+1}/5 failed: {str(_conn_err)[:80]}. Waiting {wait}s...", flush=True)
+                    await asyncio.sleep(wait)
+                else:
+                    raise RuntimeError(f"Failed to connect after 5 attempts: {_conn_err}") from _conn_err
+
+        if tools is None:
+            raise RuntimeError("Failed to discover tools")
 
         if VERBOSE:
             print(f"Mode: {mode}")
@@ -574,6 +589,11 @@ async def async_main() -> None:
             if overall_rewards:
                 print(f"\n  OVERALL: avg={sum(overall_rewards)/len(overall_rewards):.4f} across {len(overall_rewards)} episodes")
 
+    except Exception as e:
+        print(f"[ERROR] Unhandled exception: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
+        # Emit minimal valid output so validator sees structured lines
+        print(f"[START] task=error env=sre_incident_env model={model}", flush=True)
+        print(f"[END] success=false steps=0 rewards=0.00", flush=True)
     finally:
         if server_proc:
             server_proc.terminate()
