@@ -283,13 +283,13 @@ async def run_episode(
             create_kwargs["max_tokens"] = 500
 
         try:
-            response = llm_client.chat.completions.create(**create_kwargs)
+            response = await asyncio.to_thread(llm_client.chat.completions.create, **create_kwargs)
         except Exception as e:
             if VERBOSE:
                 print(f"    API error: {str(e)[:100]}")
             rewards_str = ",".join(f"{r:.2f}" for r in step_rewards) or "0.00"
             print(f"[END] success=false steps={step_count} rewards={rewards_str}", flush=True)
-            return {"reward": 0.0001, "error": str(e)[:200], "steps": step_count}
+            return {"reward": 0.001, "error": str(e)[:200], "steps": step_count}
 
         message = response.choices[0].message
 
@@ -406,7 +406,7 @@ async def run_episode(
                 print()
 
         # Hackathon structured output: [STEP]
-        safe_step_reward = max(0.0001, min(0.9999, reward))
+        safe_step_reward = max(0.001, min(0.999, reward))
         step_rewards.append(safe_step_reward)
         _progress.update({"step_count": step_count, "reward": reward})
         action_str = f"{tool_name}({json.dumps(tool_args)[:60]})" if tool_name else "text"
@@ -414,7 +414,7 @@ async def run_episode(
         print(f"[STEP] step={step_count} action={action_str} reward={safe_step_reward:.2f} done={done_str} error=null", flush=True)
 
         if done:
-            safe_reward = max(0.0001, min(0.9999, reward))
+            safe_reward = max(0.001, min(0.999, reward))
             success = "true" if safe_reward >= 0.5 else "false"
             rewards_str = ",".join(f"{r:.2f}" for r in step_rewards)
             print(f"[END] success={success} steps={step_count} rewards={rewards_str}", flush=True)
@@ -434,7 +434,7 @@ async def run_episode(
 
     rewards_str = ",".join(f"{r:.2f}" for r in step_rewards) or "0.00"
     print(f"[END] success=false steps={MAX_STEPS} rewards={rewards_str}", flush=True)
-    return {"reward": 0.0001, "error": "max_turns", "steps": MAX_STEPS}
+    return {"reward": 0.001, "error": "max_turns", "steps": MAX_STEPS}
 
 
 # ---------------------------------------------------------------------------
@@ -569,7 +569,10 @@ async def async_main() -> None:
                     print(f"\n  Episode {idx}/{total} ({sid} run{run_num}):")
                     ep_progress: Dict[str, Any] = {}
                     try:
-                        async with make_env() as ep_env:
+                        ep_env = make_env()
+                        await ep_env.__aenter__()
+                        ep_progress["env"] = ep_env
+                        try:
                             result = await asyncio.wait_for(
                                 run_episode(
                                     ep_env, llm_client, model, tools, difficulty, scenario_id=sid,
@@ -577,25 +580,39 @@ async def async_main() -> None:
                                 ),
                                 timeout=540,  # 9 min per episode — 3 episodes fit in 30min budget
                             )
-                    except asyncio.TimeoutError:
-                        # Recover partial progress — give credit for work done before timeout
-                        partial_steps = ep_progress.get("step_count", 0)
-                        partial_reward = max(0.0001, min(0.9999, ep_progress.get("reward", 0.0)))
-                        partial_rewards = ep_progress.get("step_rewards", [])
-                        rewards_str = ",".join(f"{r:.2f}" for r in partial_rewards) or "0.00"
-                        print(f"    EPISODE TIMEOUT after {partial_steps} steps (9min limit)", flush=True)
-                        # [START] was already emitted inside run_episode
-                        print(f"[END] success=false steps={partial_steps} rewards={rewards_str}", flush=True)
-                        result = {"reward": partial_reward, "error": "episode_timeout", "steps": partial_steps}
+                        except asyncio.TimeoutError:
+                            # env is still open — call verify_resolution for partial credit
+                            partial_steps = ep_progress.get("step_count", 0)
+                            partial_rewards = ep_progress.get("step_rewards", [])
+                            partial_reward = 0.0
+                            try:
+                                vr_result = await ep_env.call_tool(
+                                    "verify_resolution",
+                                    affected_service="unknown",
+                                    failure_type="timeout",
+                                    root_cause="episode timed out before resolution",
+                                )
+                                partial_reward = getattr(ep_env, "_last_reward", 0.0)
+                            except Exception as vr_err:
+                                print(f"    verify_resolution failed: {vr_err}", flush=True)
+                            partial_reward = max(0.01, min(0.99, partial_reward))
+                            partial_rewards.append(partial_reward)
+                            rewards_str = ",".join(f"{r:.2f}" for r in partial_rewards) or "0.00"
+                            success = "true" if partial_reward >= 0.5 else "false"
+                            print(f"    EPISODE TIMEOUT after {partial_steps} steps → verify_resolution reward={partial_reward:.2f}", flush=True)
+                            print(f"[STEP] step={partial_steps + 1} action=verify_resolution(timeout) reward={partial_reward:.2f} done=true error=null", flush=True)
+                            print(f"[END] success={success} steps={partial_steps + 1} rewards={rewards_str}", flush=True)
+                            result = {"reward": partial_reward, "error": "episode_timeout", "steps": partial_steps + 1}
+                        finally:
+                            await ep_env.__aexit__(None, None, None)
                     except Exception as e:
                         if VERBOSE:
                             print(f"    SESSION FAILED: {str(e)[:120]}")
                         task_name = sid or f"{difficulty}_episode"
                         if not ep_progress.get("started"):
-                            # [START] was never emitted — connection failed before reset
                             print(f"[START] task={task_name} env=sre_incident_env model={model}", flush=True)
-                        print(f"[END] success=false steps=0 rewards=0.00", flush=True)
-                        result = {"reward": 0.0001, "error": f"session_error: {str(e)[:100]}", "steps": 0}
+                        print(f"[END] success=false steps=0 rewards=0.001", flush=True)
+                        result = {"reward": 0.001, "error": f"session_error: {str(e)[:100]}", "steps": 0}
                     result["scenario_id"] = sid
                     result["run"] = run_num
                     tier_results.append(result)
@@ -623,7 +640,7 @@ async def async_main() -> None:
         print(f"[ERROR] Unhandled exception: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
         # Emit minimal valid output so validator sees structured lines
         print(f"[START] task=error env=sre_incident_env model={model}", flush=True)
-        print(f"[END] success=false steps=0 rewards=0.00", flush=True)
+        print(f"[END] success=false steps=0 rewards=0.001", flush=True)
     finally:
         if server_proc:
             server_proc.terminate()

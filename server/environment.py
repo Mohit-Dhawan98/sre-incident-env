@@ -56,7 +56,7 @@ class SREIncidentEnvironment(MCPEnvironment):
         self._queries_used: int = 0
         self._steps: int = 0
         self._done: bool = False
-        self._current_reward: float = 0.0
+        self._current_reward: float = 0.001
         self._services_queried: set = set()
         self._tool_call_history: list = []
         # V2.1 maze navigation tracking
@@ -446,11 +446,11 @@ class SREIncidentEnvironment(MCPEnvironment):
         self._queries_used += 1
         if self._queries_used > self._query_budget:
             self._done = True
-            self._current_reward = 0.0
+            self._current_reward = 0.001
             return json.dumps({
                 "error": "Query budget exhausted. Episode ended with reward 0.",
                 "done": True,
-                "reward": 0.0,
+                "reward": 0.001,
             })
         return None
 

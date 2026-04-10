@@ -131,4 +131,4 @@ def compute_reward(
     )
 
     # Hackathon Phase 2: scores must be strictly in (0, 1)
-    return round(min(0.9999, max(0.0001, total)), 4)
+    return round(min(0.999, max(0.001, total)), 4)
