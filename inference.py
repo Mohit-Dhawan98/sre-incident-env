@@ -39,9 +39,9 @@ from openai import OpenAI
 # Configuration
 # ---------------------------------------------------------------------------
 
-API_BASE_URL = os.getenv("API_BASE_URL") or "https://api.openai.com/v1"
+API_BASE_URL = os.getenv("API_BASE_URL") or "https://router.huggingface.co/v1"
 API_KEY = os.getenv("HF_TOKEN") or os.getenv("OPENAI_API_KEY") or os.getenv("API_KEY")
-MODEL = os.getenv("MODEL_NAME") or "gpt-4o"
+MODEL = os.getenv("MODEL_NAME") or "Qwen/Qwen2.5-72B-Instruct"
 MAX_STEPS = 200
 CONTEXT_CHAR_LIMIT = 120000
 VERBOSE = True
@@ -235,9 +235,11 @@ async def run_episode(
         reset_kwargs["seed"] = seed
     reset_result = await env.reset(**reset_kwargs)
 
-    # Hackathon Phase 2 structured output: [START]
+    # Hackathon structured output: [START]
     task_name = scenario_id or f"{difficulty}_episode"
-    print(f"[START] task={task_name}", flush=True)
+    benchmark_name = "sre_incident_env"
+    step_rewards: List[float] = []
+    print(f"[START] task={task_name} env={benchmark_name} model={model}", flush=True)
 
     # Extract alert message — works for both HTTP (dict) and WebSocket (Observation)
     if isinstance(reset_result, dict):
@@ -278,7 +280,8 @@ async def run_episode(
         except Exception as e:
             if VERBOSE:
                 print(f"    API error: {str(e)[:100]}")
-            print(f"[END] task={task_name} score=0.0001 steps={step_count}", flush=True)
+            rewards_str = ",".join(f"{r:.2f}" for r in step_rewards) or "0.00"
+            print(f"[END] success=false steps={step_count} score=0.00 rewards={rewards_str}", flush=True)
             return {"reward": 0.0001, "error": str(e)[:200], "steps": step_count}
 
         message = response.choices[0].message
@@ -395,14 +398,18 @@ async def run_episode(
             else:
                 print()
 
-        # Hackathon Phase 2 structured output: [STEP] — printed on its own line
-        # Score must be strictly in (0, 1)
+        # Hackathon structured output: [STEP]
         safe_step_reward = max(0.0001, min(0.9999, reward))
-        print(f"[STEP] step={step_count} reward={safe_step_reward:.4f}", flush=True)
+        step_rewards.append(safe_step_reward)
+        action_str = f"{tool_name}({json.dumps(tool_args)[:60]})" if tool_name else "text"
+        done_str = str(done).lower()
+        print(f"[STEP] step={step_count} action={action_str} reward={safe_step_reward:.2f} done={done_str} error=null", flush=True)
 
         if done:
             safe_reward = max(0.0001, min(0.9999, reward))
-            print(f"[END] task={task_name} score={safe_reward:.4f} steps={step_count}", flush=True)
+            success = "true" if safe_reward >= 0.5 else "false"
+            rewards_str = ",".join(f"{r:.2f}" for r in step_rewards)
+            print(f"[END] success={success} steps={step_count} score={safe_reward:.2f} rewards={rewards_str}", flush=True)
             return {"reward": float(reward), "steps": step_count}
 
         # Truncate large results
@@ -417,7 +424,8 @@ async def run_episode(
 
         chat_history = summarize_old_messages(chat_history)
 
-    print(f"[END] task={task_name} score=0.0001 steps={MAX_STEPS}", flush=True)
+    rewards_str = ",".join(f"{r:.2f}" for r in step_rewards) or "0.00"
+    print(f"[END] success=false steps={MAX_STEPS} score=0.00 rewards={rewards_str}", flush=True)
     return {"reward": 0.0001, "error": "max_turns", "steps": MAX_STEPS}
 
 
@@ -540,8 +548,8 @@ async def async_main() -> None:
                         if VERBOSE:
                             print(f"    SESSION FAILED: {str(e)[:120]}")
                         task_name = sid or f"{difficulty}_episode"
-                        print(f"[START] task={task_name}", flush=True)
-                        print(f"[END] task={task_name} score=0.0001 steps=0", flush=True)
+                        print(f"[START] task={task_name} env=sre_incident_env model={model}", flush=True)
+                        print(f"[END] success=false steps=0 score=0.00 rewards=0.00", flush=True)
                         result = {"reward": 0.0001, "error": f"session_error: {str(e)[:100]}", "steps": 0}
                     result["scenario_id"] = sid
                     result["run"] = run_num

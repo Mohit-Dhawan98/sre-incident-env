@@ -1,6 +1,23 @@
 spec_version: 1
 name: sre_incident_env
+version: 1.0.0
+description: "SRE incident response environment — state-graph maze where agents investigate, diagnose, and fix production incidents through multi-step remediation with trap actions. 8 scenarios across 3 difficulty tiers with 64K+ randomization variants per scenario."
 type: space
 runtime: fastapi
 app: server.app:app
 port: 8000
+tags:
+  - openenv
+  - sre
+  - incident-response
+  - real-world
+tasks:
+  - id: easy
+    description: "2-4 step remediation with clear root cause signals. Scenarios: jvm_metaspace_classloader_leak, etcd_compaction_quota_alarm."
+    grader: server.graders.grade_easy
+  - id: medium
+    description: "3-5 step cross-service remediation with hidden root cause. Scenarios: kafka_partition_rebalance, cpu_microcode_tsc_drift, cert_expiry_mutual_tls."
+    grader: server.graders.grade_medium
+  - id: hard
+    description: "4-5 step remediation with deep causal indirection and trap actions that move the system backward. Scenarios: numa_cross_socket, kernel_tcp_rmem, wal_archive_disk_full."
+    grader: server.graders.grade_hard
