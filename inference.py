@@ -281,7 +281,7 @@ async def run_episode(
             if VERBOSE:
                 print(f"    API error: {str(e)[:100]}")
             rewards_str = ",".join(f"{r:.2f}" for r in step_rewards) or "0.00"
-            print(f"[END] success=false steps={step_count} score=0.00 rewards={rewards_str}", flush=True)
+            print(f"[END] success=false steps={step_count} rewards={rewards_str}", flush=True)
             return {"reward": 0.0001, "error": str(e)[:200], "steps": step_count}
 
         message = response.choices[0].message
@@ -409,7 +409,7 @@ async def run_episode(
             safe_reward = max(0.0001, min(0.9999, reward))
             success = "true" if safe_reward >= 0.5 else "false"
             rewards_str = ",".join(f"{r:.2f}" for r in step_rewards)
-            print(f"[END] success={success} steps={step_count} score={safe_reward:.2f} rewards={rewards_str}", flush=True)
+            print(f"[END] success={success} steps={step_count} rewards={rewards_str}", flush=True)
             return {"reward": float(reward), "steps": step_count}
 
         # Truncate large results
@@ -425,7 +425,7 @@ async def run_episode(
         chat_history = summarize_old_messages(chat_history)
 
     rewards_str = ",".join(f"{r:.2f}" for r in step_rewards) or "0.00"
-    print(f"[END] success=false steps={MAX_STEPS} score=0.00 rewards={rewards_str}", flush=True)
+    print(f"[END] success=false steps={MAX_STEPS} rewards={rewards_str}", flush=True)
     return {"reward": 0.0001, "error": "max_turns", "steps": MAX_STEPS}
 
 
@@ -549,7 +549,7 @@ async def async_main() -> None:
                             print(f"    SESSION FAILED: {str(e)[:120]}")
                         task_name = sid or f"{difficulty}_episode"
                         print(f"[START] task={task_name} env=sre_incident_env model={model}", flush=True)
-                        print(f"[END] success=false steps=0 score=0.00 rewards=0.00", flush=True)
+                        print(f"[END] success=false steps=0 rewards=0.00", flush=True)
                         result = {"reward": 0.0001, "error": f"session_error: {str(e)[:100]}", "steps": 0}
                     result["scenario_id"] = sid
                     result["run"] = run_num
