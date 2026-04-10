@@ -42,7 +42,7 @@ from openai import OpenAI
 API_BASE_URL = os.getenv("API_BASE_URL") or "https://router.huggingface.co/v1"
 API_KEY = os.getenv("HF_TOKEN") or os.getenv("OPENAI_API_KEY") or os.getenv("API_KEY")
 MODEL = os.getenv("MODEL_NAME") or "Qwen/Qwen2.5-72B-Instruct"
-MAX_STEPS = 100
+MAX_STEPS = 200
 CONTEXT_CHAR_LIMIT = 120000
 VERBOSE = True
 
@@ -222,8 +222,14 @@ async def run_episode(
     difficulty: str = "medium",
     scenario_id: str = None,
     seed: int = None,
+    _progress: Dict = None,
 ) -> Dict[str, Any]:
     """Run a single investigation episode using native function calling."""
+    # _progress is a shared dict so callers can recover partial state on timeout
+    if _progress is None:
+        _progress = {}
+    _progress.update({"step_count": 0, "reward": 0.0, "step_rewards": [], "started": True})
+
     tool_names = [t["function"]["name"] for t in tools]
     is_reasoning = any(x in model for x in ["o3", "o4", "gpt-5"])
 
@@ -239,6 +245,7 @@ async def run_episode(
     task_name = scenario_id or f"{difficulty}_episode"
     benchmark_name = "sre_incident_env"
     step_rewards: List[float] = []
+    _progress["step_rewards"] = step_rewards  # share reference
     print(f"[START] task={task_name} env={benchmark_name} model={model}", flush=True)
 
     # Extract alert message — works for both HTTP (dict) and WebSocket (Observation)
@@ -401,6 +408,7 @@ async def run_episode(
         # Hackathon structured output: [STEP]
         safe_step_reward = max(0.0001, min(0.9999, reward))
         step_rewards.append(safe_step_reward)
+        _progress.update({"step_count": step_count, "reward": reward})
         action_str = f"{tool_name}({json.dumps(tool_args)[:60]})" if tool_name else "text"
         done_str = str(done).lower()
         print(f"[STEP] step={step_count} action={action_str} reward={safe_step_reward:.2f} done={done_str} error=null", flush=True)
@@ -559,19 +567,33 @@ async def async_main() -> None:
                 for run_num in range(1, args.episodes + 1):
                     idx += 1
                     print(f"\n  Episode {idx}/{total} ({sid} run{run_num}):")
+                    ep_progress: Dict[str, Any] = {}
                     try:
                         async with make_env() as ep_env:
                             result = await asyncio.wait_for(
                                 run_episode(
                                     ep_env, llm_client, model, tools, difficulty, scenario_id=sid,
+                                    _progress=ep_progress,
                                 ),
-                                timeout=480,  # 8 min per episode — 3 episodes fit in 30min budget
+                                timeout=540,  # 9 min per episode — 3 episodes fit in 30min budget
                             )
+                    except asyncio.TimeoutError:
+                        # Recover partial progress — give credit for work done before timeout
+                        partial_steps = ep_progress.get("step_count", 0)
+                        partial_reward = max(0.0001, min(0.9999, ep_progress.get("reward", 0.0)))
+                        partial_rewards = ep_progress.get("step_rewards", [])
+                        rewards_str = ",".join(f"{r:.2f}" for r in partial_rewards) or "0.00"
+                        print(f"    EPISODE TIMEOUT after {partial_steps} steps (9min limit)", flush=True)
+                        # [START] was already emitted inside run_episode
+                        print(f"[END] success=false steps={partial_steps} rewards={rewards_str}", flush=True)
+                        result = {"reward": partial_reward, "error": "episode_timeout", "steps": partial_steps}
                     except Exception as e:
                         if VERBOSE:
                             print(f"    SESSION FAILED: {str(e)[:120]}")
                         task_name = sid or f"{difficulty}_episode"
-                        print(f"[START] task={task_name} env=sre_incident_env model={model}", flush=True)
+                        if not ep_progress.get("started"):
+                            # [START] was never emitted — connection failed before reset
+                            print(f"[START] task={task_name} env=sre_incident_env model={model}", flush=True)
                         print(f"[END] success=false steps=0 rewards=0.00", flush=True)
                         result = {"reward": 0.0001, "error": f"session_error: {str(e)[:100]}", "steps": 0}
                     result["scenario_id"] = sid
