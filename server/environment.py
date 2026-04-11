@@ -22,6 +22,12 @@ from server.reward import compute_reward
 from server.scenario_loader import ScenarioLoader
 from server.state_machine import StateMachine
 
+# Module-level state bridge for stateless HTTP /reset → /step flow.
+# The openenv framework creates a NEW env instance per HTTP request.
+# This stores the live env after reset() so step() can find it.
+_HTTP_ENVS: Dict[str, "SREIncidentEnvironment"] = {}
+_HTTP_LATEST: Optional[str] = None  # episode_id of most recent reset
+
 
 class SREIncidentEnvironment(MCPEnvironment):
     """RL environment simulating full SRE incident lifecycle.
@@ -68,6 +74,54 @@ class SREIncidentEnvironment(MCPEnvironment):
         self._last_was_remediation: bool = False         # for observe-after-fix tracking
         self._unique_remediation_keys: set = set()       # unique (tool, target, action) combos
         self._state = State(episode_id=str(uuid4()), step_count=0)
+
+        # Auto-reset so fresh instances have a valid episode (DarDrax pattern).
+        # Also try to rehydrate from module-level state (wysh3 pattern).
+        self._rehydrate_or_reset()
+
+    def _rehydrate_or_reset(self):
+        """Rehydrate from module-level state if available, else auto-reset."""
+        global _HTTP_LATEST
+        if _HTTP_LATEST and _HTTP_LATEST in _HTTP_ENVS:
+            src = _HTTP_ENVS[_HTTP_LATEST]
+            self._copy_state_from(src)
+        else:
+            self.reset(difficulty="medium")
+
+    def _copy_state_from(self, src: "SREIncidentEnvironment"):
+        """Copy all episode state from another env instance."""
+        self._scenario = src._scenario
+        self._log_gen = src._log_gen
+        self._metric_gen = src._metric_gen
+        self._state_machine = src._state_machine
+        self._difficulty = src._difficulty
+        self._query_budget = src._query_budget
+        self._queries_used = src._queries_used
+        self._steps = src._steps
+        self._done = src._done
+        self._current_reward = src._current_reward
+        self._services_queried = src._services_queried
+        self._tool_call_history = src._tool_call_history
+        self._discovered_services = src._discovered_services
+        self._remediation_count = src._remediation_count
+        self._execute_runbook_count = src._execute_runbook_count
+        self._discovered_before_action = src._discovered_before_action
+        self._observation_after_fix = src._observation_after_fix
+        self._last_was_remediation = src._last_was_remediation
+        self._unique_remediation_keys = src._unique_remediation_keys
+        self._state = src._state
+
+    def _save_to_http_state(self):
+        """Save this env to module-level state so next /step can find it."""
+        global _HTTP_LATEST
+        eid = self._state.episode_id
+        _HTTP_ENVS[eid] = self
+        _HTTP_LATEST = eid
+        # Clean old episodes (keep max 5)
+        if len(_HTTP_ENVS) > 5:
+            oldest = list(_HTTP_ENVS.keys())[0]
+            if oldest != eid:
+                del _HTTP_ENVS[oldest]
 
     def _register_tools(self, mcp: FastMCP) -> None:
         """Register all SRE tools on the MCP server."""
@@ -467,9 +521,12 @@ class SREIncidentEnvironment(MCPEnvironment):
         if seed is not None:
             random.seed(seed)
 
+        # Framework may pass options as nested dict or flat kwargs
+        options = kwargs.get("options", {})
+        if isinstance(options, dict):
+            kwargs.update(options)
         difficulty = kwargs.get("difficulty", "medium")
         scenario_id = kwargs.get("scenario_id", None)
-
         self._scenario = self.loader.sample(
             difficulty=difficulty, scenario_id=scenario_id, seed=seed
         )
@@ -513,6 +570,9 @@ class SREIncidentEnvironment(MCPEnvironment):
             f"Call verify_resolution when the system is healthy."
         )
 
+        # Save to module-level state so next /step can rehydrate
+        self._save_to_http_state()
+
         return Observation(
             done=False,
             reward=0.01,
@@ -540,6 +600,7 @@ class SREIncidentEnvironment(MCPEnvironment):
         obs = super().step(action, timeout_s=timeout_s, **kwargs)
         obs.done = self._done
         obs.reward = self._current_reward
+        self._save_to_http_state()
         return obs
 
     async def step_async(
@@ -548,6 +609,7 @@ class SREIncidentEnvironment(MCPEnvironment):
         self._steps += 1
         self._state.step_count = self._steps
         obs = await super().step_async(action, timeout_s=timeout_s, **kwargs)
+        self._save_to_http_state()
         obs.done = self._done
         obs.reward = self._current_reward
         return obs

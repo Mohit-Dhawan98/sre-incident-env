@@ -50,10 +50,10 @@ class SREIncidentEnv(MCPToolClient):
 
 
 class SREIncidentEnvHTTP:
-    """HTTP-based client. Each call is a short HTTP round-trip.
+    """HTTP-based client using standard /reset + /step endpoints.
 
-    No WebSocket — avoids HF Space proxy idle timeout.
-    Same API as SREIncidentEnv: reset(), list_tools(), call_tool().
+    Uses the same endpoints the validator uses — no custom /api/* routes.
+    State persists server-side via module-level _HTTP_ENVS bridge.
     """
 
     def __init__(self, base_url: str, timeout: float = 120.0):
@@ -65,7 +65,6 @@ class SREIncidentEnvHTTP:
             self.base_url = self.base_url.replace("wss://", "https://", 1)
         self.timeout = timeout
         self._client = None
-        self._session_id: Optional[str] = None
         self._tools_cache: Optional[List[Dict]] = None
 
     async def __aenter__(self):
@@ -74,63 +73,68 @@ class SREIncidentEnvHTTP:
         return self
 
     async def __aexit__(self, *args):
-        if self._session_id and self._client:
-            try:
-                await self._client.post(
-                    f"{self.base_url}/api/close",
-                    json={"session_id": self._session_id},
-                )
-            except Exception:
-                pass
         if self._client:
             await self._client.aclose()
             self._client = None
 
     async def reset(self, **kwargs) -> Dict[str, Any]:
-        """Reset environment. Returns observation metadata dict."""
+        """Reset environment via standard /reset endpoint."""
         if self._client is None:
             import httpx
             self._client = httpx.AsyncClient(timeout=self.timeout)
 
         resp = await self._client.post(
-            f"{self.base_url}/api/reset",
+            f"{self.base_url}/reset",
             json={
-                "difficulty": kwargs.get("difficulty", "medium"),
-                "scenario_id": kwargs.get("scenario_id"),
                 "seed": kwargs.get("seed"),
+                "options": {
+                    "difficulty": kwargs.get("difficulty", "medium"),
+                    "scenario_id": kwargs.get("scenario_id"),
+                },
             },
         )
         resp.raise_for_status()
         data = resp.json()
-        self._session_id = data["session_id"]
-        self._tools_cache = data.get("tools", [])
-        return data["observation"]
+
+        # Fetch tools via MCP
+        if self._tools_cache is None:
+            mcp_resp = await self._client.post(
+                f"{self.base_url}/mcp",
+                json={"jsonrpc": "2.0", "method": "tools/list", "params": {}, "id": 1},
+            )
+            mcp_data = mcp_resp.json()
+            self._tools_cache = mcp_data.get("result", {}).get("tools", [])
+
+        return data.get("observation", {})
 
     async def list_tools(self) -> List[Dict]:
-        """Return cached tool list from last reset()."""
+        """Return cached tool list from MCP."""
         if self._tools_cache is not None:
             return self._tools_cache
-        # If no cache, do a fresh reset to get tools
         return []
 
     async def call_tool(self, name: str, **kwargs) -> Any:
-        """Call a tool. Returns the tool's result (usually a JSON string)."""
-        if not self._session_id:
-            raise RuntimeError("No active session. Call reset() first.")
-
+        """Call a tool via standard /step endpoint."""
         resp = await self._client.post(
-            f"{self.base_url}/api/call_tool",
+            f"{self.base_url}/step",
             json={
-                "session_id": self._session_id,
-                "tool_name": name,
-                "arguments": kwargs,
+                "action": {
+                    "tool_name": name,
+                    "arguments": kwargs,
+                },
             },
         )
         resp.raise_for_status()
         data = resp.json()
 
-        # Store done/reward on the response for callers that need it
+        # Store done/reward for callers
         self._last_done = data.get("done", False)
-        self._last_reward = data.get("reward", 0.0)
+        self._last_reward = data.get("reward", 0.01)
 
-        return data.get("result", "")
+        # Extract tool result from observation
+        obs = data.get("observation", {})
+        if isinstance(obs, dict) and "result" in obs:
+            result = obs["result"]
+            if isinstance(result, dict):
+                return result.get("data", "")
+        return ""
