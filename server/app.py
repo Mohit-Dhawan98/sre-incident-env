@@ -44,6 +44,32 @@ if _state_graph_dir.exists():
     )
 
 
+# ─── /tasks endpoint — required by Phase 2 validator ─────────
+@app.get("/tasks", tags=["Environment Info"])
+async def list_tasks():
+    """Return available tasks with grader references."""
+    return [
+        {
+            "id": "easy",
+            "description": "2-4 step remediation with clear root cause signals.",
+            "difficulty": "easy",
+            "grader": "server.graders.grade_easy",
+        },
+        {
+            "id": "medium",
+            "description": "3-5 step cross-service remediation with hidden root cause.",
+            "difficulty": "medium",
+            "grader": "server.graders.grade_medium",
+        },
+        {
+            "id": "hard",
+            "description": "4-5 step remediation with deep causal indirection and trap actions.",
+            "difficulty": "hard",
+            "grader": "server.graders.grade_hard",
+        },
+    ]
+
+
 # ─── HTTP Session Management ─────────────────────────────────
 # Each session holds a persistent SREIncidentEnvironment instance.
 # No WebSocket needed — every call is a short HTTP round-trip.
