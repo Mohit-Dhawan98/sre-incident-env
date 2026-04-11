@@ -25,6 +25,7 @@ RUN pip install --no-cache-dir \
     "anthropic>=0.92.0"
 
 ENV PYTHONUNBUFFERED=1
+# cache-bust: v2-reward-fix
 ENV PYTHONPATH="/app"
 
 EXPOSE 7860
