@@ -478,7 +478,7 @@ class SREIncidentEnvironment(MCPEnvironment):
         self._queries_used = 0
         self._steps = 0
         self._done = False
-        self._current_reward = 0.0
+        self._current_reward = 0.01
         self._services_queried = set()
         self._tool_call_history = []
         # Reset V2.1 maze tracking
@@ -515,7 +515,7 @@ class SREIncidentEnvironment(MCPEnvironment):
 
         return Observation(
             done=False,
-            reward=0.0,
+            reward=0.01,
             metadata={
                 "message": alert,
                 "scenario_id": self._scenario["id"],
