@@ -865,7 +865,7 @@ def _hero_html() -> str:
     <div class="stat"><div class="k">Actions</div><div class="v">{total_actions}</div></div>
     <div class="stat"><div class="k">Reward Comps</div><div class="v">7</div></div>
     <div class="stat"><div class="k">Tiers</div><div class="v">3</div></div>
-    <div class="stat"><div class="k">Baselined</div><div class="v">3 LLMs</div></div>
+    <div class="stat"><div class="k">Baselined</div><div class="v">4 LLMs</div></div>
   </div>
 </div>
 """

@@ -186,7 +186,7 @@ The agent discovers direction by **observing** (read_logs, check_metric) after e
 
 **Observation** (`Observation`):
 - `done: bool` — episode finished?
-- `reward: float` — 0.0 during episode, final (0.0001, 0.9999) on `verify_resolution`
+- `reward: float` — 0.01 during episode, final [0.01, 0.99] on `verify_resolution`
 - `metadata.logs: List[LogEntry]` — `{timestamp, service, level, message}`
 - `metadata.metric_series: List[MetricPoint]` — `{timestamp, value}`
 - `metadata.services: List[str]` — service names
@@ -212,7 +212,7 @@ The agent discovers direction by **observing** (read_logs, check_metric) after e
 **Healthy max**: 0.40 + 0.20 + 0.10 + 0.10 + 0.10 + 0.05 + 0.05 = **1.00**
 **Not-healthy max**: 0 + 0.20 + 0 + 0.10 + 0.10 + 0.05 + 0.05 = **0.50**
 
-Final reward clamped strictly to `(0.0001, 0.9999)` for Hackathon Phase 2 validator compatibility.
+Final reward clamped strictly to `[0.01, 0.99]` for Hackathon Phase 2 validator compatibility.
 
 ### Design principles
 
@@ -273,24 +273,22 @@ export API_BASE_URL="https://api.openai.com/v1"
 export MODEL_NAME="gpt-5.4"
 export HF_TOKEN="your-api-key"
 
-# Default: 1 run per scenario × 8 scenarios = 8 episodes (~8 min, under 20min validator cap)
+# Default: 1 random scenario per tier × 3 tiers = 3 episodes (fits 30min validator budget)
 python inference.py --space https://Maverick98-sre-incident-env.hf.space
 
-# 2 runs per scenario (for variance estimates)
-python inference.py --space https://Maverick98-sre-incident-env.hf.space --episodes 2
-
 # Single tier
-python inference.py --space https://Maverick98-sre-incident-env.hf.space --difficulty hard
+python inference.py --space https://Maverick98-sre-incident-env.hf.space --difficulty easy
 ```
 
 Inference output follows the Hackathon Phase 2 structured format:
 
 ```
-[START] task=jvm_metaspace_classloader_leak_001
-[STEP] step=1 reward=0.0001
-[STEP] step=2 reward=0.0001
+[START] task=jvm_metaspace_classloader_leak_001 env=sre_incident_env model=gpt-5.4
+[STEP] step=1 action=list_services({}) reward=0.01 done=false error=null
+[STEP] step=2 action=read_logs(...) reward=0.01 done=false error=null
 ...
-[END] task=jvm_metaspace_classloader_leak_001 score=0.8917 steps=32
+[STEP] step=32 action=verify_resolution(...) reward=0.87 done=true error=null
+[END] success=true steps=32 score=0.87 rewards=0.01,0.01,...,0.87
 ```
 
 ## Architecture
@@ -299,5 +297,6 @@ Inference output follows the Hackathon Phase 2 structured format:
 - **State machine**: Graph-based traversal with per-state action tables, max-progress-depth tracking for partial credit
 - **Reward**: 7-component, fully deterministic, quadratic partial progress
 - **Scenarios**: 8 hardened production incidents (2 easy + 3 medium + 3 hard), 50 states, 159 actions
-- **Client**: `SREIncidentEnvHTTP` (async, HTTP transport — robust through HF Space proxy)
-- **Inference**: OpenAI function calling via `openai` client, smart context summarization, per-episode session isolation
+- **Client**: `SREIncidentEnvHTTP` (async, standard /reset + /step endpoints — robust through HF Space proxy)
+- **State bridge**: Module-level `_HTTP_ENVS` dict persists episode state across stateless HTTP requests
+- **Inference**: OpenAI function calling via `openai` client, smart context summarization, 540s per-episode timeout with partial credit
